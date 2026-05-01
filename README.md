@@ -8,7 +8,7 @@
 
 **Spec-only.** This is the first entry in the Pattern Commons series specified without a reference implementation. The spec is at v0.4.1 and is internally coherent, externally citable, and complete enough to build against. Whether a reference implementation gets built — and whether the contractor case is the first one — is an open question.
 
-The spec proper is forthcoming in this repo. In the meantime, the v0.4.1 specification is available as a working artifact under [Systems of Thought](https://www.systemsofthought.com/). This README will be updated when the spec, vocabulary, and schemas land in their canonical locations.
+The spec proper is forthcoming in this repo. The v0.4.1 specification will be available as a working artifact under [Systems of Thought](https://www.systemsofthought.com/) by 5.1.26 EOD. This README will be updated when the spec, vocabulary, and schemas land in their canonical locations.
 
 ## What This Pattern Is
 
