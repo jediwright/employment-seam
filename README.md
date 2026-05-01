@@ -8,7 +8,7 @@
 
 **Spec-only.** This is the first entry in the Pattern Commons series specified without a reference implementation. The spec is at v0.4.1 and is internally coherent, externally citable, and complete enough to build against. Whether a reference implementation gets built — and whether the contractor case is the first one — is an open question.
 
-The spec proper is forthcoming in this repo. The v0.4.1 specification will be available as a working artifact under [Systems of Thought](https://www.systemsofthought.com/) by 5.1.26 EOD. This README will be updated when the spec, vocabulary, and schemas land in their canonical locations.
+The spec proper is forthcoming in this repo. The v0.4.1 specification will be available as a working artifact under [Systems of Thought](https://www.systemsofthought.com/) by 5.1.26 EOD EDT. This README will be updated when the spec, vocabulary, and schemas land in their canonical locations.
 
 ## What This Pattern Is
 
@@ -30,7 +30,7 @@ It is the first Pattern Commons entry where all four layers of the [Seam Stack](
 
 The local-first prototype series demonstrates the seam argument across four built domains: governance monitoring (no seam), commerce (one seam per transaction), healthcare (one seam per intake), and social networking (a seam per connection, distributed). The employment seam is the seventh Pattern Commons entry and the first specified without a corresponding prototype.
 
-The Seam Stack synthesis — the four-layer architectural composition the series demonstrates — is documented at [seamstack.org](https://seamstack.org) and in the [local-first-series](https://github.com/jediwright/local-first-series) repo.
+The Seam Stack synthesis — the four-layer architectural composition the series demonstrates — will be documented at [seamstack.org](https://seamstack.org) and in the [local-first-series](https://github.com/jediwright/local-first-series) repo by 5.3.26 EOD EDT.
 
 ## What's Coming
 
