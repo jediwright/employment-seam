@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { AutomergeUrl } from '@automerge/automerge-repo'
 import { useDocument } from '@automerge/automerge-repo-react-hooks'
 import type { WorkerKnowledgeGraph } from './types'
+import ProjectsTab from './ProjectsTab'
 
 type Tab = 'projects' | 'contacts' | 'decisions' | 'artifacts' | 'access-log'
 
@@ -43,7 +44,7 @@ export default function App({ docUrl }: { docUrl: AutomergeUrl }) {
       </nav>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
-        {activeTab === 'projects' && <div className="text-gray-400">Projects — coming next</div>}
+        {activeTab === 'projects' && <ProjectsTab docUrl={docUrl} />}
         {activeTab === 'contacts' && <div className="text-gray-400">Contacts — coming soon</div>}
         {activeTab === 'decisions' && <div className="text-gray-400">Decisions — coming soon</div>}
         {activeTab === 'artifacts' && <div className="text-gray-400">Artifacts — coming soon</div>}
