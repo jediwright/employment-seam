@@ -1,45 +1,54 @@
-import { useDocument } from '@automerge/automerge-repo-react-hooks'
+import { useState } from 'react'
 import type { AutomergeUrl } from '@automerge/automerge-repo'
-import type { WorkerKnowledgeGraph, Decision } from './types'
+import { useDocument } from '@automerge/automerge-repo-react-hooks'
+import type { WorkerKnowledgeGraph } from './types'
 
-function TypeResolutionTest({ docUrl }: { docUrl: AutomergeUrl }) {
+type Tab = 'projects' | 'contacts' | 'decisions' | 'artifacts' | 'access-log'
+
+export default function App({ docUrl }: { docUrl: AutomergeUrl }) {
   const [doc, changeDoc] = useDocument<WorkerKnowledgeGraph>(docUrl)
+  const [activeTab, setActiveTab] = useState<Tab>('projects')
 
-  const testMutation = () => {
-    // AM-1: all mutations go through changeDoc
-    changeDoc((d) => {
-      // Test 1: append a Decision onto decisions[]
-      const decision: Decision = {
-        decisionId: crypto.randomUUID(),
-        projectId: 'test-project',
-        title: 'Test Decision',
-        context: 'FM-3 type resolution test',
-        outcome: 'Types resolve correctly',
-        rationale: 'Compile-time verification',
-        madeAt: new Date().toISOString(),
-        participants: [],
-        createdAt: new Date().toISOString(),
-      }
-      d.decisions.push(decision)
-
-      // Test 2: assign an optional field
-      const handoffId = 'test-handoff'
-      if (d.handoffs[handoffId]) {
-        d.handoffs[handoffId].completedAt = new Date().toISOString()
-      }
-
-      // Test 3: read identity.createdAt (compile-time check)
-      const _createdAt: string = d.identity.createdAt
-      void _createdAt
-    })
-  }
+  if (!doc) return <div className="p-4">Loading your knowledge graph...</div>
 
   return (
-    <div>
-      <p>createdAt: {doc?.identity.createdAt ?? 'loading...'}</p>
-      <button onClick={testMutation}>Run FM-3 Test</button>
+    <div className="min-h-screen bg-gray-50">
+      <header className="bg-white border-b border-gray-200 px-6 py-4">
+        <div className="max-w-4xl mx-auto">
+          <h1 className="text-xl font-semibold text-gray-900">
+            {doc.identity.displayName || 'My Knowledge Graph'}
+          </h1>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Created {new Date(doc.identity.createdAt).toLocaleDateString()}
+          </p>
+        </div>
+      </header>
+
+      <nav className="bg-white border-b border-gray-200 px-6">
+        <div className="max-w-4xl mx-auto flex gap-6">
+          {(['projects', 'contacts', 'decisions', 'artifacts', 'access-log'] as Tab[]).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1).replace('-', ' ')}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      <main className="max-w-4xl mx-auto px-6 py-8">
+        {activeTab === 'projects' && <div className="text-gray-400">Projects — coming next</div>}
+        {activeTab === 'contacts' && <div className="text-gray-400">Contacts — coming soon</div>}
+        {activeTab === 'decisions' && <div className="text-gray-400">Decisions — coming soon</div>}
+        {activeTab === 'artifacts' && <div className="text-gray-400">Artifacts — coming soon</div>}
+        {activeTab === 'access-log' && <div className="text-gray-400">Access Log — coming soon</div>}
+      </main>
     </div>
   )
 }
-
-export default TypeResolutionTest
