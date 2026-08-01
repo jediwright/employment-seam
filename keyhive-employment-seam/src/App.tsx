@@ -5,6 +5,7 @@ import type { WorkerKnowledgeGraph } from './types'
 import ProjectsTab from './ProjectsTab'
 import ContactsTab from './ContactsTab'
 import DecisionsTab from './DecisionsTab'
+import ArtifactsTab from './ArtifactsTab'
 
 type Tab = 'projects' | 'contacts' | 'decisions' | 'artifacts' | 'access-log'
 
@@ -122,7 +123,7 @@ export default function App({ docUrl }: { docUrl: AutomergeUrl }) {
         {activeTab === 'projects' && <ProjectsTab docUrl={docUrl} />}
         {activeTab === 'contacts' && <ContactsTab docUrl={docUrl} />}
         {activeTab === 'decisions' && <DecisionsTab docUrl={docUrl} />}
-        {activeTab === 'artifacts' && <div className="text-gray-400">Artifacts — coming soon</div>}
+        {activeTab === 'artifacts' && <ArtifactsTab docUrl={docUrl} />}
         {activeTab === 'access-log' && <div className="text-gray-400">Access Log — coming soon</div>}
       </main>
     </div>
