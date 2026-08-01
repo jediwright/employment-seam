@@ -77,7 +77,7 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
         employerName:     employerName.trim(),
         relationshipType,
         accessTier,
-        keyhiveCapabilityRef: undefined,
+        
         notes:            notes.trim(),
         createdAt:        now,
       }
