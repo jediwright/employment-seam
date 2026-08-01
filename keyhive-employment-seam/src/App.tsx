@@ -7,8 +7,9 @@ import ContactsTab from './ContactsTab'
 import DecisionsTab from './DecisionsTab'
 import ArtifactsTab from './ArtifactsTab'
 import AccessLogTab from './AccessLogTab'
+import HandoffsTab from './HandoffsTab'
 
-type Tab = 'projects' | 'contacts' | 'decisions' | 'artifacts' | 'access-log'
+type Tab = 'projects' | 'contacts' | 'decisions' | 'artifacts' | 'access-log' | 'handoffs'
 
 // First-launch identity setup screen.
 // Shown when displayName is empty (i.e. doc was just created).
@@ -104,7 +105,7 @@ export default function App({ docUrl }: { docUrl: AutomergeUrl }) {
 
       <nav className="bg-white border-b border-gray-200 px-6">
         <div className="max-w-4xl mx-auto flex gap-6">
-          {(['projects', 'contacts', 'decisions', 'artifacts', 'access-log'] as Tab[]).map((tab) => (
+          {(['projects', 'contacts', 'decisions', 'artifacts', 'access-log', 'handoffs'] as Tab[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -126,6 +127,7 @@ export default function App({ docUrl }: { docUrl: AutomergeUrl }) {
         {activeTab === 'decisions' && <DecisionsTab docUrl={docUrl} />}
         {activeTab === 'artifacts' && <ArtifactsTab docUrl={docUrl} />}
         {activeTab === 'access-log' && <AccessLogTab docUrl={docUrl} />}
+        {activeTab === 'handoffs' && <HandoffsTab docUrl={docUrl} />}
       </main>
     </div>
   )
