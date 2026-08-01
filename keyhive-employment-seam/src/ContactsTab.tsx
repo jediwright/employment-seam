@@ -8,7 +8,6 @@ import type {
   AccessTier,
   RelationshipType,
 } from './types'
-
 const RELATIONSHIP_LABELS: Record<RelationshipType, string> = {
   employer:       'Employer',
   colleague:      'Colleague',
@@ -16,14 +15,12 @@ const RELATIONSHIP_LABELS: Record<RelationshipType, string> = {
   client:         'Client',
   subcontractor:  'Subcontractor',
 }
-
 const ACCESS_TIER_LABELS: Record<AccessTier, string> = {
   none:          'No access',
   'read-bundle': 'Read bundle',
   'read-full':   'Read full',
   'write-collab':'Write / collab',
 }
-
 function capabilityState(ref?: string): { label: string; classes: string } {
   if (!ref)
     return { label: 'No cryptographic access', classes: 'bg-amber-50 text-amber-700' }
@@ -31,15 +28,12 @@ function capabilityState(ref?: string): { label: string; classes: string } {
     return { label: 'Access revoked', classes: 'bg-red-50 text-red-600' }
   return { label: 'Access granted', classes: 'bg-green-50 text-green-700' }
 }
-
 export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
   const [doc, changeDoc] = useDocument<WorkerKnowledgeGraph>(docUrl)
   const repo             = useRepo()
-
   const [showForm, setShowForm]                   = useState(false)
   const [errors, setErrors]                       = useState<Record<string, string>>({})
   const [capabilityLoading, setCapabilityLoading] = useState<string | null>(null)
-
   // Form state
   const [displayName, setDisplayName]         = useState('')
   const [role, setRole]                       = useState('')
@@ -47,11 +41,8 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
   const [relationshipType, setRelationshipType] = useState<RelationshipType>('colleague')
   const [accessTier, setAccessTier]           = useState<AccessTier>('none')
   const [notes, setNotes]                     = useState('')
-
   if (!doc) return null
-
   const contacts = Object.values(doc.contacts)
-
   // --- Validation ---
   const validate = () => {
     const e: Record<string, string> = {}
@@ -60,15 +51,12 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
     if (!employerName.trim()) e.employerName = 'Employer is required'
     return e
   }
-
   // --- Add contact (data only; capability ungoverned until worker explicitly grants) ---
   const handleAddContact = () => {
     const e = validate()
     if (Object.keys(e).length > 0) { setErrors(e); return }
-
     const contactId = crypto.randomUUID()
     const now       = new Date().toISOString()
-
     changeDoc((d) => {
       const contact: Contact = {
         contactId,
@@ -77,7 +65,6 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
         employerName:     employerName.trim(),
         relationshipType,
         accessTier,
-        
         notes:            notes.trim(),
         createdAt:        now,
       }
@@ -85,19 +72,16 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
       d.identity.lastModified  = now
       // No access log entry on add — capability grant is the governance event
     })
-
     setDisplayName(''); setRole(''); setEmployerName('')
     setRelationshipType('colleague'); setAccessTier('none'); setNotes('')
     setErrors({}); setShowForm(false)
   }
-
   // --- Grant capability (worker-initiated; explicit governance action; logged) ---
   const handleGrantCapability = async (contact: Contact) => {
     setCapabilityLoading(contact.contactId)
     try {
       const capDoc = await repo.create2()
       const capRef = capDoc.url
-
       const now = new Date().toISOString()
       changeDoc((d) => {
         d.contacts[contact.contactId].keyhiveCapabilityRef = capRef
@@ -116,13 +100,11 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
       setCapabilityLoading(null)
     }
   }
-
   // --- Revoke capability (worker-initiated; logged; prior ref preserved) ---
   const handleRevokeCapability = (contact: Contact) => {
     if (!contact.keyhiveCapabilityRef) return
     const priorRef = contact.keyhiveCapabilityRef
     const now      = new Date().toISOString()
-
     changeDoc((d) => {
       d.contacts[contact.contactId].keyhiveCapabilityRef = `revoked:${priorRef}`
       d.identity.lastModified = now
@@ -135,7 +117,6 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
       })
     })
   }
-
   return (
     <div>
       {/* Header */}
@@ -148,13 +129,11 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
           Add Contact
         </button>
       </div>
-
       {/* Add contact form */}
       {showForm && (
         <div className="bg-white border border-gray-200 rounded-lg p-6 mb-6">
           <h3 className="text-sm font-semibold text-gray-900 mb-4">New Contact</h3>
           <div className="space-y-4">
-
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
               <input
@@ -165,7 +144,6 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
               />
               {errors.displayName && <p className="text-red-500 text-xs mt-1">{errors.displayName}</p>}
             </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Role *</label>
               <input
@@ -176,7 +154,6 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
               />
               {errors.role && <p className="text-red-500 text-xs mt-1">{errors.role}</p>}
             </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Employer *</label>
               <input
@@ -187,7 +164,6 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
               />
               {errors.employerName && <p className="text-red-500 text-xs mt-1">{errors.employerName}</p>}
             </div>
-
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Relationship</label>
@@ -214,7 +190,6 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
                 </select>
               </div>
             </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
               <textarea
@@ -225,12 +200,10 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
                 placeholder="Your framing of this relationship"
               />
             </div>
-
             <p className="text-xs text-gray-400">
               Cryptographic access is not provisioned on add. Use "Grant access" on the
               contact card when ready — that action is recorded in your access log.
             </p>
-
             <div className="flex gap-3">
               <button
                 onClick={handleAddContact}
@@ -248,12 +221,10 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
           </div>
         </div>
       )}
-
       {/* Empty state */}
       {contacts.length === 0 && !showForm && (
         <p className="text-gray-400 text-sm">No contacts yet. Add the first one.</p>
       )}
-
       {/* Contact list */}
       <div className="space-y-3">
         {contacts.map((contact) => {
@@ -261,11 +232,9 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
           const isGranted = !!contact.keyhiveCapabilityRef && !contact.keyhiveCapabilityRef.startsWith('revoked:')
           const isRevoked = contact.keyhiveCapabilityRef?.startsWith('revoked:') ?? false
           const isLoading = capabilityLoading === contact.contactId
-
           return (
             <div key={contact.contactId} className="bg-white border border-gray-200 rounded-lg p-4">
               <div className="flex justify-between items-start gap-4">
-
                 {/* Contact info */}
                 <div className="min-w-0">
                   <h3 className="font-medium text-gray-900">{contact.displayName}</h3>
@@ -289,7 +258,6 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
                     {cap.label}
                   </span>
                 </div>
-
                 {/* Capability actions — the governance surface */}
                 <div className="flex flex-col gap-2 shrink-0">
                   {!isGranted && !isRevoked && (
@@ -313,7 +281,6 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
                     <span className="text-xs text-gray-400 px-3 py-1.5">Revoked</span>
                   )}
                 </div>
-
               </div>
             </div>
           )
