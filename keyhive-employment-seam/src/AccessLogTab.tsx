@@ -17,6 +17,10 @@ const EVENT_TYPE_LABELS: Record<AccessEventType, string> = {
   'capability-revocation-confirmed': 'Revocation confirmed',
   'bundle-accessed':      'Bundle accessed',
   'gate-check':           'Gate check',
+  // Phase 2 (Item 2.1): one record per revoked contact at seam-fire;
+  // labeled 'exposure-upper-bound' because per-peer sync state is unavailable
+  // on this transport — the record attests to the maximum, not the actual.
+  'exposure-record':      'Exposure record',
 }
 
 const EVENT_TYPE_CLASSES: Record<AccessEventType, string> = {
@@ -31,6 +35,8 @@ const EVENT_TYPE_CLASSES: Record<AccessEventType, string> = {
   'capability-revocation-confirmed': 'bg-red-50 text-red-600',
   'bundle-accessed':      'bg-purple-50 text-purple-700',
   'gate-check':           'bg-slate-100 text-slate-700',
+  // Orange-toned: evidence layer, not a blocking event, but consequential.
+  'exposure-record':      'bg-orange-50 text-orange-700',
 }
 
 export default function AccessLogTab({ docUrl }: { docUrl: AutomergeUrl }) {
@@ -97,6 +103,17 @@ export default function AccessLogTab({ docUrl }: { docUrl: AutomergeUrl }) {
                   </div>
                   {event.notes && (
                     <p className="text-sm text-gray-600 mt-1">{event.notes}</p>
+                  )}
+                  {event.exposureRecord && (
+                    <div className="mt-1.5 text-xs text-orange-800 bg-orange-50 border border-orange-100 rounded px-2 py-1 font-mono space-y-0.5">
+                      <p><span className="font-sans font-medium text-orange-700">bound:</span> {event.exposureRecord.boundType}</p>
+                      <p><span className="font-sans font-medium text-orange-700">docs:</span> {event.exposureRecord.documentIds.join(', ')}</p>
+                      <p><span className="font-sans font-medium text-orange-700">heads:</span> {
+                        Object.entries(event.exposureRecord.headsAtRevocation)
+                          .map(([docId, heads]) => `${docId}: [${heads.join(', ')}]`)
+                          .join(' | ')
+                      }</p>
+                    </div>
                   )}
                 </div>
                 <time className="text-xs text-gray-400 shrink-0 tabular-nums">

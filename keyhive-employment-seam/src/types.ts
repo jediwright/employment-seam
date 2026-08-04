@@ -179,6 +179,43 @@ export type GateResult = 'pass' | 'blocked-revoked' | 'blocked-unconfirmed'
  *  gate.ts confirmRevocation, which requires a stated basis). */
 export type RevocationConfirmationState = 'none' | 'issued' | 'confirmed'
 
+// ---------------------------------------------------------------------------
+// Exposure record — Phase 2 (build plan v0.4.1 Item 2.1)
+//
+// Captures per-revoked-contact exposure surface at the moment seam fires.
+// Q1 source: revocation cannot reach copies already synced; this record is
+// the worker-side evidence of what those copies can contain.
+//
+// FALLBACK PATH (confirmed by Item 1.1 findings): this adapter
+// (BroadcastChannel, syncServer 'none') exposes NO per-peer sync state —
+// there is no API surface to query what heads the remote side holds.
+// The record therefore uses documentIds + WORKER-SIDE heads at revocation
+// timestamp, explicitly labeled 'exposure-upper-bound': "at most this,
+// as of this moment." This is honest and spec-aligned: the worker cannot
+// know what the counterparty holds; it can only attest to the maximum.
+//
+// seam:exposureRecord candidate — flagged for Pattern Commons thread; out
+// of scope here (build plan v0.4.1 Phase 2 spec note).
+// ---------------------------------------------------------------------------
+
+export type ExposureRecord = {
+  /** 'exposure-upper-bound': worker-side heads used; per-peer heads
+   *  unavailable on this transport. Label travels with the data so
+   *  downstream readers understand the constraint. */
+  boundType:    'exposure-upper-bound'
+  /** IDs of documents the contact held a capability to at revocation time.
+   *  In this prototype: the single root document. The list is the pattern;
+   *  multi-document deployments populate it per-document. */
+  documentIds:  string[]
+  /** Worker-side Automerge document heads at revocation timestamp, per
+   *  document. Array of opaque head strings (as returned by DocHandle.heads()
+   *  — treated as strings in this layer; Automerge owns their semantics). */
+  headsAtRevocation: Record<string, string[]>
+  /** ISO timestamp of revocation — matches the capability-revoked event's
+   *  timestamp so the two records can be correlated. */
+  revokedAt:    string
+}
+
 export type AccessEvent = {
   eventId:           string
   timestamp:         string
@@ -192,6 +229,10 @@ export type AccessEvent = {
   contactClass?:     ContactClass
   /** Item 1.3: gate-check entries carry the result as structured data. */
   gateResult?:       GateResult
+  /** Phase 2 (Item 2.1): exposure-record events carry the structured
+   *  snapshot. Attached to the handoff-completed entry's companion
+   *  exposure-record event, one per revoked contact. */
+  exposureRecord?:   ExposureRecord
   notes:             string
 }
 
@@ -211,3 +252,9 @@ export type AccessEventType =
   | 'capability-revocation-confirmed'
   | 'bundle-accessed'
   | 'gate-check'
+  /** Phase 2 (Item 2.1): one event per revoked contact at seam-fire;
+   *  carries the structured ExposureRecord snapshot. Emitted AFTER the
+   *  capability-revoked event for that contact. The handoff-completed
+   *  event's bundle hash incorporates the exposure records (via
+   *  deriveBundleHash extension in HandoffsTab). */
+  | 'exposure-record'
