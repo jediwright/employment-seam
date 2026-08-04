@@ -173,8 +173,10 @@ export type ArtifactType = 'document' | 'diagram' | 'code' | 'meeting-notes' | '
 export type GateResult = 'pass' | 'blocked-revoked' | 'blocked-unconfirmed'
 
 /** Revocation-confirmation state, per build plan v0.3 Item 1.2's two-state
- *  model. Item 1.2 is unbuilt at 050067c; gate.ts derives this honestly
- *  from present single-state data (see revocationConfirmationState). */
+ *  model — built 2026-08-03. 'issued' = revoked-local (seam fired, signal
+ *  propagating; ref prefix `revoked:`); 'confirmed' = acknowledgment
+ *  received (ref prefix `revoked-confirmed:`; sole transition:
+ *  gate.ts confirmRevocation, which requires a stated basis). */
 export type RevocationConfirmationState = 'none' | 'issued' | 'confirmed'
 
 export type AccessEvent = {
@@ -202,5 +204,10 @@ export type AccessEventType =
   | 'account-pre-empted'
   | 'capability-granted'
   | 'capability-revoked'
+  /** Item 1.2: 'capability-revoked' records the ISSUED half (local
+   *  operation complete, signal in flight); this event records the
+   *  CONFIRMED half. The timestamp delta between the two entries is the
+   *  propagation gap, made visible. */
+  | 'capability-revocation-confirmed'
   | 'bundle-accessed'
   | 'gate-check'

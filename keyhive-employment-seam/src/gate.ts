@@ -52,23 +52,95 @@ const TIER_ORDER: Record<AccessTier, number> = {
 }
 
 /**
- * Revocation-confirmation state — THE SINGLE EDIT POINT FOR ITEM 1.2.
+ * Revocation-confirmation state — Item 1.2 (two-state revocation), built
+ * 2026-08-03 against Item 1.1's degraded-sync findings (degradedSync.test.ts).
  *
- * Item 1.2 (two-state revocation: `capability-revocation-issued` /
- * `capability-revocation-confirmed`) is unbuilt at 050067c; the present
- * schema records revocation as a single local `revoked:`-prefixed ref.
- * Per v0.3 Item 1.2's risk note — "do not fake confirmation from local
- * success" — a locally-revoked capability with no propagation-confirmation
- * signal is honestly ISSUED, not confirmed. When 1.2 lands its two-state
- * events, this function is the only place the gate needs to change.
+ * Two revocation states, per build plan v0.3 Item 1.2 and the Thread A
+ * kickoff's naming:
+ *   - `revoked:<ref>`            → 'issued'    (kickoff: "revoked-local" —
+ *                                  seam fired, confirmation propagating)
+ *   - `revoked-confirmed:<ref>`  → 'confirmed' (kickoff: "revoked-confirmed"
+ *                                  — acknowledgment signal received)
+ *
+ * Gate mapping (unchanged switch below): 'issued' → `blocked-unconfirmed`
+ * (the gate refuses to act inside the propagation gap); 'confirmed' →
+ * `blocked-revoked` (revocation final on this replica's knowledge).
+ *
+ * ITEM 1.1 FINDING, BINDING HERE: this transport (BroadcastChannel,
+ * syncServer 'none') exposes NO per-peer acknowledgment signal, and the
+ * measured exposure-beyond-physics is zero — the gate blocks on the first
+ * invocation after a signal lands. Per the v0.3 risk-note fallback: a
+ * capability therefore stays 'issued' indefinitely unless an explicit,
+ * basis-stating confirmation event upgrades it (see confirmRevocation).
+ * Nothing in this file — or anywhere — auto-upgrades issued → confirmed
+ * from local success. "Issued — propagation unconfirmed on this
+ * transport" is the honest resting state.
  */
 export function revocationConfirmationState(
   contact: Contact,
 ): RevocationConfirmationState {
   const ref = contact.keyhiveCapabilityRef
-  if (!ref || !ref.startsWith('revoked:')) return 'none'
-  // Pre-1.2: local revocation exists; no confirmation signal is modeled.
-  return 'issued'
+  if (!ref) return 'none'
+  if (ref.startsWith('revoked-confirmed:')) return 'confirmed'
+  if (ref.startsWith('revoked:')) return 'issued'
+  return 'none'
+}
+
+/**
+ * True for a ref in EITHER revocation state. Callers that previously
+ * checked `ref.startsWith('revoked:')` (e.g., the seam-fire loop) must use
+ * this instead — a bare 'revoked:' check misses 'revoked-confirmed:' and
+ * would double-prefix an already-confirmed revocation.
+ */
+export function isRevocationRef(ref: string | undefined): boolean {
+  return !!ref && (ref.startsWith('revoked-confirmed:') || ref.startsWith('revoked:'))
+}
+
+/**
+ * The sole issued → confirmed transition. Upgrades the ref and writes a
+ * `capability-revocation-confirmed` access-log entry with its own
+ * timestamp — the delta between the `capability-revoked` entry and this
+ * one IS the propagation gap, made visible in the record (v0.3 Item 1.2;
+ * the CSA time-to-revoke metric at individual-worker scale).
+ *
+ * `basis` is REQUIRED: confirmation must name the acknowledgment signal
+ * it rests on (a future transport ack handler, a receiving-party receipt,
+ * an out-of-band attestation). This is the structural form of the risk
+ * note's rule — confirmation cannot be asserted without a stated source,
+ * so it cannot be faked from local success. On the current transport
+ * (Item 1.1 finding: no ack surface) no code path calls this; it is the
+ * landing point for whichever acknowledgment signal arrives first.
+ *
+ * Returns 'confirmed' on transition; 'not-applicable' if the contact is
+ * unknown, unrevoked, or already confirmed (idempotent — no double event).
+ */
+export function confirmRevocation(
+  change: (mutate: (d: WorkerKnowledgeGraph) => void) => void,
+  contactId: string,
+  basis: string,
+): 'confirmed' | 'not-applicable' {
+  let outcome: 'confirmed' | 'not-applicable' = 'not-applicable'
+  const now = new Date().toISOString()
+  change((d) => {
+    const contact = d.contacts[contactId]
+    if (!contact) return
+    const ref = contact.keyhiveCapabilityRef
+    // Only an 'issued' revocation can be confirmed. ('revoked-confirmed:'
+    // does not match the bare 'revoked:' prefix — see state fn above.)
+    if (!ref || !ref.startsWith('revoked:')) return
+    const priorRef = ref.slice('revoked:'.length)
+    contact.keyhiveCapabilityRef = `revoked-confirmed:${priorRef}`
+    d.accessLog.push({
+      eventId:          crypto.randomUUID(),
+      timestamp:        now,
+      eventType:        'capability-revocation-confirmed',
+      subjectContactId: contactId,
+      contactClass:     contact.contactClass ?? 'human',
+      notes:            `Revocation confirmed: propagation acknowledged. Basis: ${basis}. Prior ref: ${priorRef}`,
+    })
+    outcome = 'confirmed'
+  })
+  return outcome
 }
 
 export type CapabilityGate = {

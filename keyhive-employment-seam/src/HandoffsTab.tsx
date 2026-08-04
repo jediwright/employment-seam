@@ -1,6 +1,7 @@
 // src/HandoffsTab.tsx
 import { useState } from 'react'
 import { useDocument } from '@automerge/automerge-repo-react-hooks'
+import { isRevocationRef } from './gate'
 import type { AutomergeUrl } from '@automerge/automerge-repo'
 import type {
   WorkerKnowledgeGraph,
@@ -139,7 +140,9 @@ export default function HandoffsTab({ docUrl }: { docUrl: AutomergeUrl }) {
       Object.values(d.contacts).forEach((contact) => {
         if (
           contact.keyhiveCapabilityRef &&
-          !contact.keyhiveCapabilityRef.startsWith('revoked:')
+          // Item 1.2: guard against BOTH revocation states — a bare
+          // 'revoked:' check would double-prefix a 'revoked-confirmed:' ref.
+          !isRevocationRef(contact.keyhiveCapabilityRef)
         ) {
           const priorRef = contact.keyhiveCapabilityRef
           d.contacts[contact.contactId].keyhiveCapabilityRef = `revoked:${priorRef}`
@@ -150,7 +153,11 @@ export default function HandoffsTab({ docUrl }: { docUrl: AutomergeUrl }) {
             subjectContactId: contact.contactId,
             contactClass:     contact.contactClass ?? 'human',
             handoffId:        handoff.handoffId,
-            notes:            `Capability revoked at seam-firing. Prior ref: ${priorRef}`,
+            // Item 1.2 issued half: local operation complete, signal in
+            // flight. Confirmation is a separate event with its own
+            // timestamp (capability-revocation-confirmed) — on this
+            // transport it may honestly never arrive.
+            notes:            `Revocation issued at seam-firing (local operation complete, confirmation propagating). Prior ref: ${priorRef}`,
           })
         }
       })
@@ -161,7 +168,7 @@ export default function HandoffsTab({ docUrl }: { docUrl: AutomergeUrl }) {
         projectId:        handoff.projectId,
         handoffId:        handoff.handoffId,
         subjectContactId: handoff.receivingPartyContactId,
-        notes:            `Handoff complete. Bundle delivered. All active capabilities revoked.`,
+        notes:            `Handoff complete. Bundle delivered. Revocation issued for all active capabilities (confirmation propagates separately).`,
       })
     })
     setConfirmingId(null)
