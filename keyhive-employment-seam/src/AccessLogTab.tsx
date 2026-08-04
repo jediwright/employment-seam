@@ -11,7 +11,10 @@ const EVENT_TYPE_LABELS: Record<AccessEventType, string> = {
   'handoff-failed':       'Handoff failed',
   'account-pre-empted':   'Account pre-empted',
   'capability-granted':   'Capability granted',
-  'capability-revoked':   'Capability revoked',
+  // Item 1.2 two-state model: 'capability-revoked' is the ISSUED half —
+  // labeling it "revoked" was the UI-level overstatement Item 1.2 corrects.
+  'capability-revoked':   'Revocation issued',
+  'capability-revocation-confirmed': 'Revocation confirmed',
   'bundle-accessed':      'Bundle accessed',
   'gate-check':           'Gate check',
 }
@@ -24,7 +27,8 @@ const EVENT_TYPE_CLASSES: Record<AccessEventType, string> = {
   'handoff-failed':       'bg-amber-50 text-amber-700',
   'account-pre-empted':   'bg-amber-50 text-amber-700',
   'capability-granted':   'bg-green-50 text-green-700',
-  'capability-revoked':   'bg-red-50 text-red-600',
+  'capability-revoked':   'bg-amber-50 text-amber-700',
+  'capability-revocation-confirmed': 'bg-red-50 text-red-600',
   'bundle-accessed':      'bg-purple-50 text-purple-700',
   'gate-check':           'bg-slate-100 text-slate-700',
 }

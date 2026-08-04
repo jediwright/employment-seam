@@ -12,6 +12,8 @@ import {
   createCapabilityGate,
   openAgentActionContext,
   revocationConfirmationState,
+  confirmRevocation,
+  isRevocationRef,
 } from './gate'
 import type { GateDoc } from './gate'
 import type {
@@ -121,13 +123,71 @@ describe('assertCapabilityCurrent', () => {
   })
 })
 
-describe('revocationConfirmationState (Item 1.2 seam)', () => {
-  it('reports issued — never confirmed — for local single-state revocation', () => {
+describe('two-state revocation (Item 1.2)', () => {
+  it('reports issued — never confirmed — for local revocation with no acknowledgment', () => {
     // v0.3 Item 1.2 risk note: do not fake confirmation from local success.
     const revoked = makeContact({ keyhiveCapabilityRef: 'revoked:automerge:cap1' })
     expect(revocationConfirmationState(revoked)).toBe('issued')
     const granted = makeContact({ keyhiveCapabilityRef: 'automerge:cap1' })
     expect(revocationConfirmationState(granted)).toBe('none')
+  })
+
+  it('reports confirmed for a revoked-confirmed ref, and the gate maps it to blocked-revoked', async () => {
+    const confirmed = makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'revoked-confirmed:automerge:cap1' })
+    expect(revocationConfirmationState(confirmed)).toBe('confirmed')
+    const { gate, accessLog } = makeHarness([confirmed])
+    // Kickoff mapping: blocked-revoked is the confirmed state's gate result;
+    // issued maps to blocked-unconfirmed (covered above and in 1.1's tests).
+    expect(await gate.assertCapabilityCurrent('c-1', 'read-bundle')).toBe('blocked-revoked')
+    expect(accessLog[0].gateResult).toBe('blocked-revoked')
+  })
+
+  it('confirmRevocation is the sole issued → confirmed transition, requires a basis, and logs its own event', () => {
+    const contact = makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'revoked:automerge:cap1' })
+    const accessLog: AccessEvent[] = []
+    const doc: GateDoc = { contacts: { 'c-1': contact }, accessLog }
+    const change = (mutate: (d: WorkerKnowledgeGraph) => void) => mutate(doc as WorkerKnowledgeGraph)
+
+    const outcome = confirmRevocation(change, 'c-1', 'simulated receiving-party receipt (test)')
+    expect(outcome).toBe('confirmed')
+    expect(revocationConfirmationState(doc.contacts['c-1'])).toBe('confirmed')
+    expect(doc.contacts['c-1'].keyhiveCapabilityRef).toBe('revoked-confirmed:automerge:cap1')
+    // Its own event, its own timestamp — the issued→confirmed delta is the
+    // propagation gap made visible in the record.
+    const evt = accessLog.find((e) => e.eventType === 'capability-revocation-confirmed')
+    expect(evt).toBeDefined()
+    expect(evt?.notes).toContain('Basis: simulated receiving-party receipt (test)')
+    expect(evt?.contactClass).toBe('human')
+  })
+
+  it('confirmRevocation is idempotent and inapplicable to unrevoked or unknown contacts', () => {
+    const confirmed = makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'revoked-confirmed:automerge:cap1' })
+    const granted = makeContact({ contactId: 'c-2', keyhiveCapabilityRef: 'automerge:cap2' })
+    const accessLog: AccessEvent[] = []
+    const doc: GateDoc = { contacts: { 'c-1': confirmed, 'c-2': granted }, accessLog }
+    const change = (mutate: (d: WorkerKnowledgeGraph) => void) => mutate(doc as WorkerKnowledgeGraph)
+
+    expect(confirmRevocation(change, 'c-1', 'any')).toBe('not-applicable') // already confirmed — no double event
+    expect(confirmRevocation(change, 'c-2', 'any')).toBe('not-applicable') // never revoked
+    expect(confirmRevocation(change, 'nobody', 'any')).toBe('not-applicable') // unknown
+    expect(accessLog).toHaveLength(0)
+    expect(doc.contacts['c-2'].keyhiveCapabilityRef).toBe('automerge:cap2') // untouched
+  })
+
+  it('issued never auto-upgrades: repeated gate checks leave the state issued (no fake confirmation)', async () => {
+    const contact = makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'revoked:automerge:cap1' })
+    const { gate } = makeHarness([contact])
+    for (let i = 0; i < 3; i++) {
+      expect(await gate.assertCapabilityCurrent('c-1', 'read-bundle')).toBe('blocked-unconfirmed')
+    }
+    expect(revocationConfirmationState(contact)).toBe('issued') // resting state on this transport
+  })
+
+  it('isRevocationRef covers both states — the seam-fire guard cannot double-prefix', () => {
+    expect(isRevocationRef('revoked:automerge:cap1')).toBe(true)
+    expect(isRevocationRef('revoked-confirmed:automerge:cap1')).toBe(true)
+    expect(isRevocationRef('automerge:cap1')).toBe(false)
+    expect(isRevocationRef(undefined)).toBe(false)
   })
 })
 
