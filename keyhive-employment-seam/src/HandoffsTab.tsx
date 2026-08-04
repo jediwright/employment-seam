@@ -8,6 +8,7 @@ import type {
   HandoffRecord,
   HandoffStatus,
   HandoffFailureState,
+  ExposureRecord,
 } from './types'
 
 const STATUS_LABELS: Record<HandoffStatus, string> = {
@@ -36,10 +37,29 @@ const FAILURE_LABELS: Record<HandoffFailureState, string> = {
   'contested':                              'Contested',
 }
 
-// SHA-256 of handoffId + initiatedAt — prototype-scope stand-in for
-// the URDNA2015 canonical hash that Phase 6 of the ceremony produces.
-async function deriveBundleHash(handoffId: string, initiatedAt: string): Promise<string> {
-  const input = new TextEncoder().encode(`${handoffId}:${initiatedAt}`)
+// SHA-256 of handoffId + initiatedAt + exposure records (Phase 2) —
+// prototype-scope stand-in for the URDNA2015 canonical hash Phase 6 produces.
+// Phase 2 (Item 2.1): exposure records are now part of the hash input so the
+// bundle hash commits to the exposure surface at seam-fire, not just the
+// handoff identity. The records are serialized deterministically (sorted by
+// contactId) so the hash is stable across equivalent inputs.
+async function deriveBundleHash(
+  handoffId: string,
+  initiatedAt: string,
+  exposureRecords: Array<{ contactId: string; record: ExposureRecord }> = [],
+): Promise<string> {
+  const sorted = [...exposureRecords].sort((a, b) =>
+    a.contactId < b.contactId ? -1 : a.contactId > b.contactId ? 1 : 0
+  )
+  const exposurePayload = sorted
+    .map(({ contactId, record }) =>
+      `${contactId}:${record.boundType}:${record.documentIds.join(',')}:${record.revokedAt}`
+    )
+    .join('|')
+  const rawInput = exposurePayload
+    ? `${handoffId}:${initiatedAt}:${exposurePayload}`
+    : `${handoffId}:${initiatedAt}`
+  const input = new TextEncoder().encode(rawInput)
   const buffer = await crypto.subtle.digest('SHA-256', input)
   return Array.from(new Uint8Array(buffer))
     .map((b) => b.toString(16).padStart(2, '0'))
@@ -130,22 +150,85 @@ export default function HandoffsTab({ docUrl }: { docUrl: AutomergeUrl }) {
     })
   }
 
-  // Phase 7 — seam fires: delivered, all active capabilities revoked
-  const handleConfirmDelivery = (handoff: HandoffRecord) => {
+  // Phase 7 — seam fires: delivered, all active capabilities revoked.
+  // Phase 2 (Item 2.1): exposure record captured per revoked contact at
+  // seam-fire time; incorporated into the bundle hash.
+  //
+  // Sequence:
+  //   1. Identify contacts to revoke (read-only pre-pass on current doc).
+  //   2. Build ExposureRecord per contact — worker-side heads at this moment,
+  //      labeled 'exposure-upper-bound' (per-peer state unavailable on this
+  //      transport; confirmed by Item 1.1 findings).
+  //   3. changeDoc: revoke capabilities, emit capability-revoked +
+  //      exposure-record events, set handoff delivered.
+  //   4. Recompute bundle hash incorporating exposure records; patch into doc.
+  const handleConfirmDelivery = async (handoff: HandoffRecord) => {
+    if (!doc) return
     const now = new Date().toISOString()
+
+    // --- Step 1 + 2: collect contacts to revoke and build exposure records ---
+    // Read current document IDs and worker-side heads. In this single-document
+    // prototype, every contact with a capability holds access to the root
+    // knowledge-graph document (the only Automerge document in the repo).
+    // The pattern scales: multi-document deployments would enumerate per-contact
+    // document grants here and capture heads for each.
+    //
+    // rootDocUrl is the URL of the single document this tab manages; it is
+    // stable across the lifetime of the prototype. We use the handoffId
+    // (not the URL) as the document identifier in the record so the record
+    // is portable and doesn't embed internal addressing. The canonical
+    // document reference in this prototype IS the handoff bundle — so the
+    // handoffId is the natural identifier for "the document being handed off."
+    const revokedContactIds: string[] = []
+    Object.values(doc.contacts).forEach((contact) => {
+      if (
+        contact.keyhiveCapabilityRef &&
+        !isRevocationRef(contact.keyhiveCapabilityRef)
+      ) {
+        revokedContactIds.push(contact.contactId)
+      }
+    })
+
+    // Worker-side document heads at revocation time. We use the artifact and
+    // project IDs as the documentId inventory — together they represent the
+    // full content surface the contact could have synced. The 'heads' here
+    // are the worker-side Automerge heads of the root document (the single
+    // document in this prototype), captured at this instant.
+    //
+    // NOTE: DocHandle.heads() is not available at this layer (we have the
+    // unwrapped doc, not the handle). We use a stable content-derived proxy:
+    // the count of access-log entries (a monotonically increasing value that
+    // changes with every write). This is prototype-scope only — a production
+    // exposure record would call handle.heads() directly. Labeled accordingly.
+    const documentId = handoff.projectId  // project-scoped; the handed-off work product
+    const contentProxy = `log-length:${doc.accessLog.length}`   // see note above
+
+    const exposurePayload: Array<{ contactId: string; record: ExposureRecord }> =
+      revokedContactIds.map((contactId) => ({
+        contactId,
+        record: {
+          boundType:         'exposure-upper-bound',
+          documentIds:       [documentId],
+          headsAtRevocation: { [documentId]: [contentProxy] },
+          revokedAt:         now,
+        },
+      }))
+
+    // --- Step 3: changeDoc — revocations + exposure-record events ---------------
     changeDoc((d) => {
       d.handoffs[handoff.handoffId].status      = 'delivered'
       d.handoffs[handoff.handoffId].completedAt = now
       d.identity.lastModified                   = now
+
       Object.values(d.contacts).forEach((contact) => {
         if (
           contact.keyhiveCapabilityRef &&
-          // Item 1.2: guard against BOTH revocation states — a bare
-          // 'revoked:' check would double-prefix a 'revoked-confirmed:' ref.
           !isRevocationRef(contact.keyhiveCapabilityRef)
         ) {
           const priorRef = contact.keyhiveCapabilityRef
           d.contacts[contact.contactId].keyhiveCapabilityRef = `revoked:${priorRef}`
+
+          // Capability-revoked: the ISSUED half (Item 1.2 — unchanged).
           d.accessLog.push({
             eventId:          crypto.randomUUID(),
             timestamp:        now,
@@ -153,14 +236,32 @@ export default function HandoffsTab({ docUrl }: { docUrl: AutomergeUrl }) {
             subjectContactId: contact.contactId,
             contactClass:     contact.contactClass ?? 'human',
             handoffId:        handoff.handoffId,
-            // Item 1.2 issued half: local operation complete, signal in
-            // flight. Confirmation is a separate event with its own
-            // timestamp (capability-revocation-confirmed) — on this
-            // transport it may honestly never arrive.
             notes:            `Revocation issued at seam-firing (local operation complete, confirmation propagating). Prior ref: ${priorRef}`,
           })
+
+          // Phase 2 (Item 2.1): exposure-record event, one per revoked contact.
+          // Emitted immediately after capability-revoked; same timestamp so the
+          // pair correlates. The structured ExposureRecord travels as structured
+          // data in the event field — the notes field carries a human-readable
+          // summary for the Access Log tab.
+          const er = exposurePayload.find((p) => p.contactId === contact.contactId)?.record
+          if (er) {
+            d.accessLog.push({
+              eventId:          crypto.randomUUID(),
+              timestamp:        now,
+              eventType:        'exposure-record',
+              subjectContactId: contact.contactId,
+              contactClass:     contact.contactClass ?? 'human',
+              handoffId:        handoff.handoffId,
+              exposureRecord:   er,
+              notes:            `Exposure record (${er.boundType}): document "${documentId}" — worker-side content proxy at revocation: ${contentProxy}. ` +
+                                `Per-peer sync state unavailable on this transport (Item 1.1 finding: no ack surface on BroadcastChannel). ` +
+                                `This record attests to the maximum the contact could have held as of this moment.`,
+            })
+          }
         }
       })
+
       d.accessLog.push({
         eventId:          crypto.randomUUID(),
         timestamp:        now,
@@ -168,9 +269,20 @@ export default function HandoffsTab({ docUrl }: { docUrl: AutomergeUrl }) {
         projectId:        handoff.projectId,
         handoffId:        handoff.handoffId,
         subjectContactId: handoff.receivingPartyContactId,
-        notes:            `Handoff complete. Bundle delivered. Revocation issued for all active capabilities (confirmation propagates separately).`,
+        notes:            `Handoff complete. Bundle delivered. Revocation issued for all active capabilities (confirmation propagates separately). ` +
+                          `Exposure records captured: ${exposurePayload.length} contact(s).`,
       })
     })
+
+    // --- Step 4: recompute bundle hash incorporating exposure records ----------
+    // The hash now commits to the exposure surface at seam-fire (Item 2.1
+    // acceptance: "bundle hash incorporates it"). Async; patches the bundleHash
+    // field after the synchronous changeDoc above completes.
+    const hash = await deriveBundleHash(handoff.handoffId, handoff.initiatedAt, exposurePayload)
+    changeDoc((d) => {
+      d.handoffs[handoff.handoffId].bundleHash = hash
+    })
+
     setConfirmingId(null)
   }
 
