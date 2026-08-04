@@ -5,14 +5,9 @@ import type { AutomergeUrl } from '@automerge/automerge-repo'
 import type {
   WorkerKnowledgeGraph,
   Contact,
-  ContactClass,
   AccessTier,
   RelationshipType,
 } from './types'
-const CONTACT_CLASS_LABELS: Record<ContactClass, string> = {
-  human: 'Human',
-  agent: 'Agent (automated system)',
-}
 const RELATIONSHIP_LABELS: Record<RelationshipType, string> = {
   employer:       'Employer',
   colleague:      'Colleague',
@@ -44,7 +39,6 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
   const [role, setRole]                       = useState('')
   const [employerName, setEmployerName]       = useState('')
   const [relationshipType, setRelationshipType] = useState<RelationshipType>('colleague')
-  const [contactClass, setContactClass]       = useState<ContactClass>('human')
   const [accessTier, setAccessTier]           = useState<AccessTier>('none')
   const [notes, setNotes]                     = useState('')
   if (!doc) return null
@@ -64,7 +58,7 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
     const contactId = crypto.randomUUID()
     const now       = new Date().toISOString()
     changeDoc((d) => {
-      const core = {
+      const contact: Contact = {
         contactId,
         displayName:      displayName.trim(),
         role:             role.trim(),
@@ -74,20 +68,12 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
         notes:            notes.trim(),
         createdAt:        now,
       }
-      // Item 3.1: discriminated construction. The agent branch cannot carry
-      // recordSpeechAuthority — typed `never` in the schema, so attempting
-      // to attach any attestation/account-submission authority to an
-      // agent-class contact fails at the type level, not the UI level.
-      const contact: Contact = contactClass === 'agent'
-        ? { ...core, contactClass: 'agent' }
-        : { ...core, contactClass: 'human' }
       d.contacts[contactId]    = contact
       d.identity.lastModified  = now
       // No access log entry on add — capability grant is the governance event
     })
     setDisplayName(''); setRole(''); setEmployerName('')
-    setRelationshipType('colleague'); setContactClass('human')
-    setAccessTier('none'); setNotes('')
+    setRelationshipType('colleague'); setAccessTier('none'); setNotes('')
     setErrors({}); setShowForm(false)
   }
   // --- Grant capability (worker-initiated; explicit governance action; logged) ---
@@ -105,7 +91,6 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
           timestamp:        now,
           eventType:        'capability-granted',
           subjectContactId: contact.contactId,
-          contactClass:     contact.contactClass ?? 'human',
           notes:            `Cryptographic access granted. Capability ref: ${capRef}`,
         })
       })
@@ -128,7 +113,6 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
         timestamp:        now,
         eventType:        'capability-revoked',
         subjectContactId: contact.contactId,
-        contactClass:     contact.contactClass ?? 'human',
         notes:            `Access revoked. Prior ref preserved: ${priorRef}`,
       })
     })
@@ -179,25 +163,6 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
                 placeholder="Their employer or org"
               />
               {errors.employerName && <p className="text-red-500 text-xs mt-1">{errors.employerName}</p>}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Contact class</label>
-              <select
-                value={contactClass}
-                onChange={(e) => setContactClass(e.target.value as ContactClass)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm bg-white"
-              >
-                {(Object.entries(CONTACT_CLASS_LABELS) as [ContactClass, string][]).map(([v, l]) => (
-                  <option key={v} value={v}>{l}</option>
-                ))}
-              </select>
-              {contactClass === 'agent' && (
-                <p className="text-xs text-gray-400 mt-1">
-                  Agent-class contacts are grantee-only: they can hold and lose
-                  cryptographic access, but structurally cannot attest, submit an
-                  account, or provide separation-cause input.
-                </p>
-              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -272,14 +237,7 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
               <div className="flex justify-between items-start gap-4">
                 {/* Contact info */}
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-medium text-gray-900">{contact.displayName}</h3>
-                    {(contact.contactClass ?? 'human') === 'agent' && (
-                      <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
-                        Agent
-                      </span>
-                    )}
-                  </div>
+                  <h3 className="font-medium text-gray-900">{contact.displayName}</h3>
                   <p className="text-sm text-gray-500">
                     {contact.role} · {contact.employerName}
                   </p>

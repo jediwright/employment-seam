@@ -13,7 +13,6 @@ const EVENT_TYPE_LABELS: Record<AccessEventType, string> = {
   'capability-granted':   'Capability granted',
   'capability-revoked':   'Capability revoked',
   'bundle-accessed':      'Bundle accessed',
-  'gate-check':           'Gate check',
 }
 
 const EVENT_TYPE_CLASSES: Record<AccessEventType, string> = {
@@ -26,7 +25,6 @@ const EVENT_TYPE_CLASSES: Record<AccessEventType, string> = {
   'capability-granted':   'bg-green-50 text-green-700',
   'capability-revoked':   'bg-red-50 text-red-600',
   'bundle-accessed':      'bg-purple-50 text-purple-700',
-  'gate-check':           'bg-slate-100 text-slate-700',
 }
 
 export default function AccessLogTab({ docUrl }: { docUrl: AutomergeUrl }) {
@@ -72,20 +70,6 @@ export default function AccessLogTab({ docUrl }: { docUrl: AutomergeUrl }) {
                     </span>
                     {contact && (
                       <span className="text-xs text-gray-500">{contact.displayName}</span>
-                    )}
-                    {event.contactClass === 'agent' && (
-                      <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
-                        Agent
-                      </span>
-                    )}
-                    {event.gateResult && (
-                      <span className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ${
-                        event.gateResult === 'pass'
-                          ? 'bg-green-50 text-green-700 border border-green-200'
-                          : 'bg-red-50 text-red-600 border border-red-200'
-                      }`}>
-                        {event.gateResult}
-                      </span>
                     )}
                     {project && (
                       <span className="text-xs text-gray-400">· {project.title}</span>

@@ -1,6 +1,6 @@
 // src/HandoffsTab.tsx
 import { useState } from 'react'
-import { useDocument } from '@automerge/automerge-repo-react-hooks'
+import { useDocument, useRepo } from '@automerge/automerge-repo-react-hooks'
 import type { AutomergeUrl } from '@automerge/automerge-repo'
 import type {
   WorkerKnowledgeGraph,
@@ -47,6 +47,7 @@ async function deriveBundleHash(handoffId: string, initiatedAt: string): Promise
 
 export default function HandoffsTab({ docUrl }: { docUrl: AutomergeUrl }) {
   const [doc, changeDoc] = useDocument<WorkerKnowledgeGraph>(docUrl)
+  const repo             = useRepo()
 
   const [showForm, setShowForm]         = useState(false)
   const [errors, setErrors]             = useState<Record<string, string>>({})
@@ -148,7 +149,6 @@ export default function HandoffsTab({ docUrl }: { docUrl: AutomergeUrl }) {
             timestamp:        now,
             eventType:        'capability-revoked',
             subjectContactId: contact.contactId,
-            contactClass:     contact.contactClass ?? 'human',
             handoffId:        handoff.handoffId,
             notes:            `Capability revoked at seam-firing. Prior ref: ${priorRef}`,
           })
