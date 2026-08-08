@@ -1,52 +1,44 @@
-# employment-seam
+# keyhive-employment-seam
 
-**Pattern Commons #7 of the [Local-First Prototype Series](https://github.com/jediwright/local-first-series).** The architectural specification and reference implementation for the employment seam — the boundary event when a person enters or exits an employer–worker relationship.
-
-> The worker owns the knowledge graph. The platform facilitates the handoff and exits.
+Reference implementation for Pattern Commons #7 — the employment seam. See the [root README](../README.md) for the full architectural description and essay context.
 
 ## What This Is
 
-The employment seam is the moment a working relationship ends. The architectural argument: knowledge artifacts should be written to a durable store the worker owns *before* the seam fires, with the platform facilitating the handoff and then exiting the relationship rather than accumulating it.
+A working Vite/React/TypeScript prototype demonstrating cryptographically-governed knowledge handoff at an employment boundary. Uses [Automerge](https://automerge.org/) with [Keyhive](https://github.com/inkandswitch/keyhive) for access control. The relay is structurally prevented from reading bundle contents.
 
-This repository documents and implements Pattern Commons #7 (v0.5). The specification is maintained in [`pattern-commons-07-employment-seam-v0-5_2026-08-08.md`](https://github.com/jediwright/local-first-series) (local-first-series). The working reference implementation lives in [`keyhive-employment-seam/`](https://github.com/jediwright/employment-seam/tree/main/keyhive-employment-seam) and demonstrates the claim in running code. The prototype uses [Automerge](https://automerge.org/) with [Keyhive](https://github.com/inkandswitch/keyhive) for cryptographic access control: the relay is structurally prevented from reading bundle contents, not just instructed not to.
+Implements build plan v0.5: `assertCapabilityCurrent()` gate with `seam:gateCheckRecord` evidence, agent-class contacts (`seam:identityClass: Agent`) as structurally grantee-only, and two-state revocation (`revoked-local` / `revoked-confirmed`). 33/33 tests passing.
 
-## What the Spec Defines
+## Run Instructions
 
-The specification accommodates W-2 employment, contractor and sub-contractor arrangements, return-employee re-engagement, and mass-event separations (WARN Act, EU Collective Redundancies Directive, bankruptcy, acquisition). It defines:
+```bash
+npm install
+npm run dev      # development server at http://localhost:5173
+npm test         # vitest run — 33/33 expected
+npm run build    # production build check
+```
 
-- A nine-state failure taxonomy
-- A seven-class participant model with sub-classes, plus agent-class contacts (Class G) as a first-class participant type
-- Multi-perspective record preservation in contested cases
-- A legal record format designed for evidentiary use across jurisdictions
+## Dependency Pins — Do Not Loosen
 
-It is the first Pattern Commons entry where all four layers of the [Seam Stack](https://www.systemsofthought.com/seam-stack/) — substrate, governance, boundary, evidence — become necessary at once.
+This prototype runs on a frozen prerelease stack. Do not upgrade these without a dedicated dependency session.
 
-## What the Prototype Demonstrates
+| Package | Pinned version | Notes |
+|---|---|---|
+| `@automerge/automerge-repo` | `2.6.0-subduction.40` | Forked prerelease; hard-pinned |
+| `@automerge/automerge-repo-keyhive` | `0.4.0-alpha.sub.4` | Keyhive adapter; frozen since Oct 2025 |
+| `@automerge/automerge-repo-network-broadcastchannel` | `2.6.0-subduction.40` | Must cascade with repo pin |
+| `@automerge/automerge-repo-react-hooks` | `2.6.0-subduction.40` | Must cascade with repo pin |
+| `@automerge/automerge-repo-storage-indexeddb` | `2.6.0-subduction.40` | Must cascade with repo pin |
+| `vite-plugin-wasm` | `^3.6.0` | Required for Automerge WASM |
 
-- A worker maintains a cryptographically-governed knowledge graph across an employment relationship
-- Contacts (human and agent-class) are granted and revoked capabilities through an explicit, logged ceremony
-- The seam fires at a worker-initiated moment: all active capabilities revoke, project status advances to `handed-off`, and the access log records the full governance trail
-- An `assertCapabilityCurrent()` gate enforces that any automated actor must verify capability state per invocation — never from a cached token or TTL — before acting on a worker's behalf; every invocation produces a `seam:gateCheckRecord` evidence artifact with the agent DID, grant reference, capability name, timestamp, and gate result
-- Agent-class contacts (`seam:identityClass: Agent`) are structurally grantee-only: the type system makes attestation and account-submission authority unavailable to them, not merely unrendered in the UI (Principle 6: agents are governed parties, never authors of record)
-- Revocation follows a two-state model — `revoked-local` (seam fired, signal propagating) and `revoked-confirmed` (acknowledgment received) — so the gate can distinguish an unconfirmed revocation signal from a confirmed one and record the distinction in the access log
+All five `@automerge/*` packages must stay in lockstep at `2.6.0-subduction.40`. The Keyhive adapter (`0.4.0-alpha.sub.4`) is the only actively maintained artifact wrapping this stack.
 
-## The Larger Argument
+## Relay Status
 
-This prototype is the architectural demonstration for [*Full Personhood: The Governance Model AI Requires and Capitalism Never Built*](https://docs.google.com/document/d/1YvAFV_llrODhu6rViG8LXU1q1U1DVqTTIHBPLA4Qtdo/edit?usp=sharing) — a governance essay and manifesto developed on [Systems of Thought](https://www.systemsofthought.com/about/). The essay argues that the 140-year structural asymmetry between corporate personhood and worker personhood requires an architectural response, not just a legal one, and that the [Seam Stack](https://www.systemsofthought.com/seam-stack/) provides that model: substrate the participant owns, governance they control, boundary events with legal weight, and an evidence layer built for contested exits.
+[subduct.io](https://subduct.io) is the official Ink & Switch hosted Subduction relay, labeled "early preview, not production-ready." The prototype's BroadcastChannel transport does not expose per-peer acknowledgment — exposure records carry `boundType: 'exposure-upper-bound'` to reflect this honestly. See the access log in the running app for gate-check and revocation evidence.
 
-The employment seam is where all four Seam Stack layers become necessary at once.
+## Spec Reference
 
-## What This Pattern Does Not Solve
-
-- It does not prevent the cost of being let go. It changes the recoverability of what comes next.
-- It does not override the legal substrate in hostile exits.
-- It does not solve the recruiting problem. The structural condition that produces lengthy recruitment cycles is upstream of what the pattern addresses.
-- It does not guarantee the receiving party reads the bundle.
-- It does not adjudicate. The platform records faithfully; courts, arbitrators, and administrative tribunals decide.
-
-## How This Sits in the Series
-
-The local-first prototype series demonstrates the seam argument across built domains: governance monitoring, commerce, healthcare, and social networking. The employment seam is Pattern Commons #7 — the case where the legal substrate is part of the architecture rather than a wrapper around it, and where the inversion becomes load-bearing.
+The governing specification is Pattern Commons #7 v0.5, maintained in the [local-first-series](https://github.com/jediwright/local-first-series) repo. The prototype co-registers against it; it does not author it.
 
 ---
 
