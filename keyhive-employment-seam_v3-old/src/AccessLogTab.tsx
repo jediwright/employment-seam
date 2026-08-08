@@ -1,0 +1,129 @@
+// src/AccessLogTab.tsx
+import { useDocument } from '@automerge/automerge-repo-react-hooks'
+import type { AutomergeUrl } from '@automerge/automerge-repo'
+import type { WorkerKnowledgeGraph, AccessEventType } from './types'
+
+const EVENT_TYPE_LABELS: Record<AccessEventType, string> = {
+  'document-initialized': 'Document initialized',
+  'handoff-initiated':    'Handoff initiated',
+  'bundle-ready':         'Bundle ready',
+  'handoff-completed':    'Handoff completed',
+  'handoff-failed':       'Handoff failed',
+  'account-pre-empted':   'Account pre-empted',
+  'capability-granted':   'Capability granted',
+  // Item 1.2 two-state model: 'capability-revoked' is the ISSUED half —
+  // labeling it "revoked" was the UI-level overstatement Item 1.2 corrects.
+  'capability-revoked':   'Revocation issued',
+  'capability-revocation-confirmed': 'Revocation confirmed',
+  'bundle-accessed':      'Bundle accessed',
+  'gate-check':           'Gate check',
+  // Phase 2 (Item 2.1): one record per revoked contact at seam-fire;
+  // labeled 'exposure-upper-bound' because per-peer sync state is unavailable
+  // on this transport — the record attests to the maximum, not the actual.
+  'exposure-record':      'Exposure record',
+}
+
+const EVENT_TYPE_CLASSES: Record<AccessEventType, string> = {
+  'document-initialized': 'bg-gray-100 text-gray-600',
+  'handoff-initiated':    'bg-blue-50 text-blue-700',
+  'bundle-ready':         'bg-blue-50 text-blue-700',
+  'handoff-completed':    'bg-blue-50 text-blue-700',
+  'handoff-failed':       'bg-amber-50 text-amber-700',
+  'account-pre-empted':   'bg-amber-50 text-amber-700',
+  'capability-granted':   'bg-green-50 text-green-700',
+  'capability-revoked':   'bg-amber-50 text-amber-700',
+  'capability-revocation-confirmed': 'bg-red-50 text-red-600',
+  'bundle-accessed':      'bg-purple-50 text-purple-700',
+  'gate-check':           'bg-slate-100 text-slate-700',
+  // Orange-toned: evidence layer, not a blocking event, but consequential.
+  'exposure-record':      'bg-orange-50 text-orange-700',
+}
+
+export default function AccessLogTab({ docUrl }: { docUrl: AutomergeUrl }) {
+  const [doc] = useDocument<WorkerKnowledgeGraph>(docUrl)
+
+  if (!doc) return null
+
+  const events = [...doc.accessLog].reverse()
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex justify-between items-center mb-6">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Access Log</h2>
+          <p className="text-sm text-gray-400 mt-0.5">
+            Append-only. Worker-authored. {events.length} event{events.length !== 1 ? 's' : ''}.
+          </p>
+        </div>
+      </div>
+
+      {/* Empty state */}
+      {events.length === 0 && (
+        <p className="text-gray-400 text-sm">No events recorded yet.</p>
+      )}
+
+      {/* Event list */}
+      <div className="space-y-2">
+        {events.map((event) => {
+          const contact = event.subjectContactId
+            ? doc.contacts[event.subjectContactId]
+            : null
+          const project = event.projectId
+            ? doc.projects[event.projectId]
+            : null
+          return (
+            <div key={event.eventId} className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${EVENT_TYPE_CLASSES[event.eventType]}`}>
+                      {EVENT_TYPE_LABELS[event.eventType]}
+                    </span>
+                    {contact && (
+                      <span className="text-xs text-gray-500">{contact.displayName}</span>
+                    )}
+                    {event.contactClass === 'agent' && (
+                      <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
+                        Agent
+                      </span>
+                    )}
+                    {event.gateResult && (
+                      <span className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ${
+                        event.gateResult === 'pass'
+                          ? 'bg-green-50 text-green-700 border border-green-200'
+                          : 'bg-red-50 text-red-600 border border-red-200'
+                      }`}>
+                        {event.gateResult}
+                      </span>
+                    )}
+                    {project && (
+                      <span className="text-xs text-gray-400">· {project.title}</span>
+                    )}
+                  </div>
+                  {event.notes && (
+                    <p className="text-sm text-gray-600 mt-1">{event.notes}</p>
+                  )}
+                  {event.exposureRecord && (
+                    <div className="mt-1.5 text-xs text-orange-800 bg-orange-50 border border-orange-100 rounded px-2 py-1 font-mono space-y-0.5">
+                      <p><span className="font-sans font-medium text-orange-700">bound:</span> {event.exposureRecord.boundType}</p>
+                      <p><span className="font-sans font-medium text-orange-700">docs:</span> {event.exposureRecord.documentIds.join(', ')}</p>
+                      <p><span className="font-sans font-medium text-orange-700">heads:</span> {
+                        Object.entries(event.exposureRecord.headsAtRevocation)
+                          .map(([docId, heads]) => `${docId}: [${heads.join(', ')}]`)
+                          .join(' | ')
+                      }</p>
+                    </div>
+                  )}
+                </div>
+                <time className="text-xs text-gray-400 shrink-0 tabular-nums">
+                  {new Date(event.timestamp).toLocaleString()}
+                </time>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
