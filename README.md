@@ -8,14 +8,14 @@
 
 The employment seam is the moment a working relationship ends. The architectural argument: knowledge artifacts should be written to a durable store the worker owns *before* the seam fires, with the platform facilitating the handoff and then exiting the relationship rather than accumulating it.
 
-This repository contains both the specification (Pattern Commons #7, v0.4.1) and a working reference implementation — [`keyhive-employment-seam/`](https://github.com/jediwright/employment-seam/tree/main/keyhive-employment-seam) — that demonstrates the claim in running code. The prototype uses [Automerge](https://automerge.org/) with [Keyhive](https://github.com/inkandswitch/keyhive) for cryptographic access control: the relay is structurally prevented from reading bundle contents, not just instructed not to.
+This repository documents and implements Pattern Commons #7 (v0.5). The specification is maintained separately in the [local-first-series](https://github.com/jediwright/local-first-series) repo. The working reference implementation lives in [`keyhive-employment-seam/`](https://github.com/jediwright/employment-seam/tree/main/keyhive-employment-seam) and demonstrates the claim in running code. The prototype uses [Automerge](https://automerge.org/) with [Keyhive](https://github.com/inkandswitch/keyhive) for cryptographic access control: the relay is structurally prevented from reading bundle contents, not just instructed not to.
 
 ## What the Spec Defines
 
 The specification accommodates W-2 employment, contractor and sub-contractor arrangements, return-employee re-engagement, and mass-event separations (WARN Act, EU Collective Redundancies Directive, bankruptcy, acquisition). It defines:
 
 - A nine-state failure taxonomy
-- A seven-class participant model with sub-classes
+- A seven-class participant model with sub-classes, plus agent-class contacts (Class G) as a first-class participant type
 - Multi-perspective record preservation in contested cases
 - A legal record format designed for evidentiary use across jurisdictions
 
@@ -26,8 +26,13 @@ It is the first Pattern Commons entry where all four layers of the [Seam Stack](
 - A worker maintains a cryptographically-governed knowledge graph across an employment relationship
 - Contacts (human and agent-class) are granted and revoked capabilities through an explicit, logged ceremony
 - The seam fires at a worker-initiated moment: all active capabilities revoke, project status advances to `handed-off`, and the access log records the full governance trail
-- An `assertCapabilityCurrent()` gate enforces that any automated actor must verify capability state per invocation — never from a cached token or TTL — before acting on a worker's behalf
-- Agent-class contacts are structurally grantee-only: the type system makes attestation and account-submission authority unavailable to them, not merely unrendered in the UI
+- An `assertCapabilityCurrent()` gate enforces that any automated actor must verify capability state per invocation — never from a cached token or TTL — before acting on a worker's behalf; every invocation produces a `seam:gateCheckRecord` evidence artifact with the agent DID, grant reference, capability name, timestamp, and gate result
+- Agent-class contacts (`seam:identityClass: Agent`) are structurally grantee-only: the type system makes attestation and account-submission authority unavailable to them, not merely unrendered in the UI (Principle 6: agents are governed parties, never authors of record)
+- Revocation follows a two-state model — `revoked-local` (seam fired, signal propagating) and `revoked-confirmed` (acknowledgment received) — so the gate can distinguish an unconfirmed revocation signal from a confirmed one and record the distinction in the access log
+
+The prototype implements build plan v0.5 items 1.3, 3.1, and 3.2 (33/33 tests passing). Items 1.1 (degraded-sync test) and 1.2 (two-state revocation confirmation in the degraded-connectivity scenario) remain unimplemented.
+
+See [`keyhive-employment-seam/README.md`](keyhive-employment-seam/README.md) for run instructions.
 
 ## The Larger Argument
 
