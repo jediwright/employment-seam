@@ -1,11 +1,14 @@
 // src/gate.test.ts — Item 1.3 acceptance: tests covering all three gate
-// results; every check (including blocks) writes an access-log entry.
+// results; every check (including blocks) writes a seam:gateCheckRecord
+// access-log entry with all required v0.5 fields.
 // Item 3.1 acceptance (type level): constructing an agent contact with any
 // attestation/account-submission authority fails at the type level — the
 // expect-error compile assertions below are enforced by `tsc -b`, and
 // flip to "unused directive" errors if the constraint is ever loosened.
 // Item 3.2 acceptance: AgentActionContext is only obtainable through a
 // passing gate result.
+// Governing spec: pattern-commons-07-employment-seam-v0-5_2026-08-08.md
+// Option A rename (build plan v0.5 §3): revoked: → revoked-local:
 
 import { describe, it, expect } from 'vitest'
 import {
@@ -25,6 +28,8 @@ import type {
 } from './types'
 
 // --- Test harness: minimal doc + change collector ---------------------------
+
+const TEST_GRANT_REF = 'did:key:zGranter123'
 
 function makeContact(overrides: Partial<Contact> & { contactClass?: 'human' | 'agent' }): Contact {
   const core = {
@@ -56,61 +61,88 @@ function makeHarness(contacts: Contact[]) {
   return { gate, accessLog }
 }
 
-// --- Item 1.3: the three results --------------------------------------------
+// --- Item 1.3: the three results + seam:gateCheckRecord fields ---------------
 
 describe('assertCapabilityCurrent', () => {
-  it('returns pass for a current, sufficient capability', async () => {
+  it('returns pass and writes a gateCheckRecord with all required v0.5 fields', async () => {
     const { gate, accessLog } = makeHarness([
       makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'automerge:cap1', accessTier: 'read-full' }),
     ])
-    const result = await gate.assertCapabilityCurrent('c-1', 'read-bundle')
+    const result = await gate.assertCapabilityCurrent('c-1', 'read-bundle', TEST_GRANT_REF)
     expect(result).toBe('pass')
     expect(accessLog).toHaveLength(1)
-    expect(accessLog[0].eventType).toBe('gate-check')
-    expect(accessLog[0].gateResult).toBe('pass')
+    const entry = accessLog[0]
+    expect(entry.eventType).toBe('gate-check')
+    // seam:gateCheckRecord — all required fields present
+    expect(entry.gateCheckRecord).toBeDefined()
+    expect(entry.gateCheckRecord!.gateResult).toBe('pass')
+    expect(entry.gateCheckRecord!.grantReference).toBe(TEST_GRANT_REF)
+    expect(entry.gateCheckRecord!.capabilityName).toBe('read-bundle')
+    expect(entry.gateCheckRecord!.invocationTimestamp).toBeTruthy()
+    expect(entry.gateCheckRecord!.agentDID).toBe('automerge:cap1')
+    // grantReference also present at event level
+    expect(entry.grantReference).toBe(TEST_GRANT_REF)
+    // pass → no revocationStateReference
+    expect(entry.gateCheckRecord!.revocationStateReference).toBeUndefined()
   })
 
   it('returns blocked-revoked when no capability was ever granted', async () => {
     const { gate, accessLog } = makeHarness([
       makeContact({ contactId: 'c-1', keyhiveCapabilityRef: undefined }),
     ])
-    const result = await gate.assertCapabilityCurrent('c-1', 'read-bundle')
+    const result = await gate.assertCapabilityCurrent('c-1', 'read-bundle', TEST_GRANT_REF)
     expect(result).toBe('blocked-revoked')
     // A blocked action is governance evidence: the block is logged.
     expect(accessLog).toHaveLength(1)
-    expect(accessLog[0].gateResult).toBe('blocked-revoked')
+    expect(accessLog[0].gateCheckRecord!.gateResult).toBe('blocked-revoked')
+    // No capability on record → nothing to reference
+    expect(accessLog[0].gateCheckRecord!.revocationStateReference).toBeUndefined()
   })
 
-  it('returns blocked-revoked for an unknown contact, and still logs', async () => {
+  it('returns blocked-revoked for an unknown contact, and still logs with grantReference', async () => {
     const { gate, accessLog } = makeHarness([])
-    const result = await gate.assertCapabilityCurrent('nobody', 'read-bundle')
+    const result = await gate.assertCapabilityCurrent('nobody', 'read-bundle', TEST_GRANT_REF)
     expect(result).toBe('blocked-revoked')
     expect(accessLog).toHaveLength(1)
+    expect(accessLog[0].gateCheckRecord!.grantReference).toBe(TEST_GRANT_REF)
+    // Unknown contact: agentDID falls back to the requested contactId
+    expect(accessLog[0].gateCheckRecord!.agentDID).toBe('nobody')
   })
 
   it('returns blocked-revoked when the held tier is insufficient', async () => {
     const { gate } = makeHarness([
       makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'automerge:cap1', accessTier: 'read-bundle' }),
     ])
-    expect(await gate.assertCapabilityCurrent('c-1', 'write-collab')).toBe('blocked-revoked')
+    expect(await gate.assertCapabilityCurrent('c-1', 'write-collab', TEST_GRANT_REF)).toBe('blocked-revoked')
   })
 
-  it('returns blocked-unconfirmed inside the propagation gap (revocation issued, unconfirmed)', async () => {
+  it('returns blocked-unconfirmed inside the propagation gap and carries revocationStateReference', async () => {
     const { gate, accessLog } = makeHarness([
-      makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'revoked:automerge:cap1' }),
+      makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'revoked-local:automerge:cap1' }),
     ])
-    const result = await gate.assertCapabilityCurrent('c-1', 'read-bundle')
+    const result = await gate.assertCapabilityCurrent('c-1', 'read-bundle', TEST_GRANT_REF)
     expect(result).toBe('blocked-unconfirmed')
-    expect(accessLog[0].gateResult).toBe('blocked-unconfirmed')
+    expect(accessLog[0].gateCheckRecord!.gateResult).toBe('blocked-unconfirmed')
+    // Blocked invocation references the revocation state that triggered it
+    expect(accessLog[0].gateCheckRecord!.revocationStateReference).toBe('revoked-local:automerge:cap1')
+  })
+
+  it('blocked-revoked (confirmed state) carries revocationStateReference', async () => {
+    const { gate, accessLog } = makeHarness([
+      makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'revoked-confirmed:automerge:cap1' }),
+    ])
+    await gate.assertCapabilityCurrent('c-1', 'read-bundle', TEST_GRANT_REF)
+    expect(accessLog[0].gateCheckRecord!.gateResult).toBe('blocked-revoked')
+    expect(accessLog[0].gateCheckRecord!.revocationStateReference).toBe('revoked-confirmed:automerge:cap1')
   })
 
   it('checks state per invocation — a revocation between calls changes the result (no caching, no TTL)', async () => {
     const contact = makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'automerge:cap1' })
     const { gate, accessLog } = makeHarness([contact])
-    expect(await gate.assertCapabilityCurrent('c-1', 'read-bundle')).toBe('pass')
+    expect(await gate.assertCapabilityCurrent('c-1', 'read-bundle', TEST_GRANT_REF)).toBe('pass')
     // Revoke between invocations — the second check must see it.
-    contact.keyhiveCapabilityRef = 'revoked:automerge:cap1'
-    expect(await gate.assertCapabilityCurrent('c-1', 'read-bundle')).toBe('blocked-unconfirmed')
+    contact.keyhiveCapabilityRef = 'revoked-local:automerge:cap1'
+    expect(await gate.assertCapabilityCurrent('c-1', 'read-bundle', TEST_GRANT_REF)).toBe('blocked-unconfirmed')
     expect(accessLog).toHaveLength(2)
   })
 
@@ -118,15 +150,31 @@ describe('assertCapabilityCurrent', () => {
     const { gate, accessLog } = makeHarness([
       makeContact({ contactId: 'a-1', contactClass: 'agent', keyhiveCapabilityRef: 'automerge:cap9' }),
     ])
-    await gate.assertCapabilityCurrent('a-1', 'read-bundle')
+    await gate.assertCapabilityCurrent('a-1', 'read-bundle', TEST_GRANT_REF)
     expect(accessLog[0].contactClass).toBe('agent')
+  })
+
+  it('gate-check log is queryable by agentDID and grantReference (v0.5 acceptance)', async () => {
+    const { gate, accessLog } = makeHarness([
+      makeContact({ contactId: 'a-1', contactClass: 'agent', keyhiveCapabilityRef: 'automerge:cap9' }),
+      makeContact({ contactId: 'a-2', contactClass: 'agent', keyhiveCapabilityRef: 'automerge:capX' }),
+    ])
+    await gate.assertCapabilityCurrent('a-1', 'read-bundle', 'did:key:granterA')
+    await gate.assertCapabilityCurrent('a-2', 'read-bundle', 'did:key:granterB')
+    // Queryable by grantReference — event-level field
+    const byGrant = accessLog.filter((e) => e.grantReference === 'did:key:granterA')
+    expect(byGrant).toHaveLength(1)
+    expect(byGrant[0].subjectContactId).toBe('a-1')
+    // Queryable by agentDID — the non-prefix portion of the ref
+    const byDID = accessLog.filter((e) => e.gateCheckRecord?.agentDID === 'automerge:capX')
+    expect(byDID).toHaveLength(1)
+    expect(byDID[0].subjectContactId).toBe('a-2')
   })
 })
 
-describe('two-state revocation (Item 1.2)', () => {
-  it('reports issued — never confirmed — for local revocation with no acknowledgment', () => {
-    // v0.3 Item 1.2 risk note: do not fake confirmation from local success.
-    const revoked = makeContact({ keyhiveCapabilityRef: 'revoked:automerge:cap1' })
+describe('two-state revocation (Item 1.2) — Option A naming (revoked-local: prefix)', () => {
+  it('reports issued for the revoked-local: prefix (Option A rename)', () => {
+    const revoked = makeContact({ keyhiveCapabilityRef: 'revoked-local:automerge:cap1' })
     expect(revocationConfirmationState(revoked)).toBe('issued')
     const granted = makeContact({ keyhiveCapabilityRef: 'automerge:cap1' })
     expect(revocationConfirmationState(granted)).toBe('none')
@@ -136,14 +184,12 @@ describe('two-state revocation (Item 1.2)', () => {
     const confirmed = makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'revoked-confirmed:automerge:cap1' })
     expect(revocationConfirmationState(confirmed)).toBe('confirmed')
     const { gate, accessLog } = makeHarness([confirmed])
-    // Kickoff mapping: blocked-revoked is the confirmed state's gate result;
-    // issued maps to blocked-unconfirmed (covered above and in 1.1's tests).
-    expect(await gate.assertCapabilityCurrent('c-1', 'read-bundle')).toBe('blocked-revoked')
-    expect(accessLog[0].gateResult).toBe('blocked-revoked')
+    expect(await gate.assertCapabilityCurrent('c-1', 'read-bundle', TEST_GRANT_REF)).toBe('blocked-revoked')
+    expect(accessLog[0].gateCheckRecord!.gateResult).toBe('blocked-revoked')
   })
 
-  it('confirmRevocation is the sole issued → confirmed transition, requires a basis, and logs its own event', () => {
-    const contact = makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'revoked:automerge:cap1' })
+  it('confirmRevocation upgrades revoked-local: → revoked-confirmed: (Option A), requires a basis, logs its own event', () => {
+    const contact = makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'revoked-local:automerge:cap1' })
     const accessLog: AccessEvent[] = []
     const doc: GateDoc = { contacts: { 'c-1': contact }, accessLog }
     const change = (mutate: (d: WorkerKnowledgeGraph) => void) => mutate(doc as WorkerKnowledgeGraph)
@@ -175,39 +221,44 @@ describe('two-state revocation (Item 1.2)', () => {
   })
 
   it('issued never auto-upgrades: repeated gate checks leave the state issued (no fake confirmation)', async () => {
-    const contact = makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'revoked:automerge:cap1' })
+    const contact = makeContact({ contactId: 'c-1', keyhiveCapabilityRef: 'revoked-local:automerge:cap1' })
     const { gate } = makeHarness([contact])
     for (let i = 0; i < 3; i++) {
-      expect(await gate.assertCapabilityCurrent('c-1', 'read-bundle')).toBe('blocked-unconfirmed')
+      expect(await gate.assertCapabilityCurrent('c-1', 'read-bundle', TEST_GRANT_REF)).toBe('blocked-unconfirmed')
     }
     expect(revocationConfirmationState(contact)).toBe('issued') // resting state on this transport
   })
 
-  it('isRevocationRef covers both states — the seam-fire guard cannot double-prefix', () => {
-    expect(isRevocationRef('revoked:automerge:cap1')).toBe(true)
+  it('isRevocationRef covers both states — and the retired revoked: prefix no longer matches (Option A)', () => {
+    expect(isRevocationRef('revoked-local:automerge:cap1')).toBe(true)
     expect(isRevocationRef('revoked-confirmed:automerge:cap1')).toBe(true)
     expect(isRevocationRef('automerge:cap1')).toBe(false)
     expect(isRevocationRef(undefined)).toBe(false)
+    // Option A: the pre-rename prefix is retired. No production writer
+    // emits it after this commit; a ref carrying it is not a recognized
+    // revocation state.
+    expect(isRevocationRef('revoked:automerge:cap1')).toBe(false)
   })
 })
 
 // --- Item 3.2: AgentActionContext only via passing gate ----------------------
 
 describe('openAgentActionContext', () => {
-  it('constructs a context only on pass', async () => {
+  it('constructs a context only on pass, carrying grantReference', async () => {
     const { gate } = makeHarness([
       makeContact({ contactId: 'a-1', contactClass: 'agent', keyhiveCapabilityRef: 'automerge:cap9' }),
     ])
-    const ctx = await openAgentActionContext(gate, 'a-1', 'read-bundle')
+    const ctx = await openAgentActionContext(gate, 'a-1', 'read-bundle', TEST_GRANT_REF)
     expect(ctx).not.toBeNull()
     expect(ctx?.contactId).toBe('a-1')
+    expect(ctx?.grantReference).toBe(TEST_GRANT_REF)
   })
 
   it('returns null on any blocked result', async () => {
     const { gate } = makeHarness([
-      makeContact({ contactId: 'a-1', contactClass: 'agent', keyhiveCapabilityRef: 'revoked:automerge:cap9' }),
+      makeContact({ contactId: 'a-1', contactClass: 'agent', keyhiveCapabilityRef: 'revoked-local:automerge:cap9' }),
     ])
-    expect(await openAgentActionContext(gate, 'a-1', 'read-bundle')).toBeNull()
+    expect(await openAgentActionContext(gate, 'a-1', 'read-bundle', TEST_GRANT_REF)).toBeNull()
   })
 })
 

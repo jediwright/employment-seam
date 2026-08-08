@@ -166,6 +166,7 @@ export type ArtifactType = 'document' | 'diagram' | 'code' | 'meeting-notes' | '
 
 // ---------------------------------------------------------------------------
 // Gate result — Item 1.3 (see src/gate.ts for the gate itself)
+// Governing spec: pattern-commons-07-employment-seam-v0-5_2026-08-08.md
 // ---------------------------------------------------------------------------
 
 /** The three gate outcomes. `blocked-unconfirmed` is the gate refusing to
@@ -173,11 +174,58 @@ export type ArtifactType = 'document' | 'diagram' | 'code' | 'meeting-notes' | '
 export type GateResult = 'pass' | 'blocked-revoked' | 'blocked-unconfirmed'
 
 /** Revocation-confirmation state, per build plan v0.3 Item 1.2's two-state
- *  model — built 2026-08-03. 'issued' = revoked-local (seam fired, signal
- *  propagating; ref prefix `revoked:`); 'confirmed' = acknowledgment
- *  received (ref prefix `revoked-confirmed:`; sole transition:
- *  gate.ts confirmRevocation, which requires a stated basis). */
+ *  model — built 2026-08-03. Option A rename applied 2026-08-08 (build plan
+ *  v0.5 §3): 'issued' = revoked-local (seam fired, signal propagating; ref
+ *  prefix `revoked-local:`); 'confirmed' = acknowledgment received (ref
+ *  prefix `revoked-confirmed:`; sole transition: gate.ts confirmRevocation,
+ *  which requires a stated basis). */
 export type RevocationConfirmationState = 'none' | 'issued' | 'confirmed'
+
+/**
+ * seam:gateCheckRecord — first-class evidence artifact per PC#7 v0.5.
+ *
+ * Every assertCapabilityCurrent() invocation — pass or block — produces
+ * one of these. Required fields per the v0.5 spec:
+ *   agentDID            — the agent-class participant's DID
+ *   grantReference      — granting-party DID or grant identifier (required;
+ *                         makes the responsible legal party resolvable from
+ *                         the record without external lookup)
+ *   capabilityName      — the capability being checked
+ *   invocationTimestamp — ISO timestamp of the invocation
+ *   gateResult          — pass / blocked-revoked / blocked-unconfirmed
+ *
+ * revocationStateReference is present on blocked invocations: references
+ * the revocation-state entry that triggered the block.
+ *
+ * GATE/EVIDENCE RELATIONSHIP (PC#7 v0.5, Principle 6):
+ * assertCapabilityCurrent() (Governance/Boundary layer) and seam:aiProvenance
+ * (Evidence layer) are an adjacent pair — the gate does not read
+ * seam:aiProvenance; seam:aiProvenance carries no grant/revoke semantics.
+ * Gate-check records are first-class evidence-layer material in the same
+ * evidentiary shape as seam:aiProvenance, without either depending on the
+ * other.
+ */
+export type GateCheckRecord = {
+  /** The agent-class participant's DID. In this prototype: the contact's
+   *  keyhiveCapabilityRef base value (the non-prefix portion of the ref);
+   *  falls back to the contactId when no ref exists on record. */
+  agentDID:               string
+  /** Granting-party DID or grant identifier. Required — makes the
+   *  responsible legal party resolvable from the record itself (Principle 6,
+   *  clause 3: "resolvable to a juridical person"). */
+  grantReference:         string
+  /** The capability tier being checked (maps to AccessTier). */
+  capabilityName:         string
+  /** ISO timestamp of this invocation. */
+  invocationTimestamp:    string
+  /** Gate outcome. */
+  gateResult:             GateResult
+  /** Present on blocked invocations: the keyhiveCapabilityRef value that
+   *  triggered the block (e.g. `revoked-local:<ref>` or
+   *  `revoked-confirmed:<ref>`). Absent on `pass` and on no-capability
+   *  blocks (nothing on record to reference). */
+  revocationStateReference?: string
+}
 
 // ---------------------------------------------------------------------------
 // Exposure record — Phase 2 (build plan v0.4.1 Item 2.1)
@@ -227,8 +275,17 @@ export type AccessEvent = {
    *  grant ever issued to an automated system" is a filter, not an
    *  investigation. Absent on pre-3.1 entries (all of which are human). */
   contactClass?:     ContactClass
-  /** Item 1.3: gate-check entries carry the result as structured data. */
-  gateResult?:       GateResult
+  /** Item 1.3 (v0.5): gate-check entries carry the full seam:gateCheckRecord
+   *  structure. Replaces the prior sparse gateResult field — the structured
+   *  record makes the log queryable by agentDID and grantReference per the
+   *  v0.5 acceptance criteria. */
+  gateCheckRecord?:  GateCheckRecord
+  /** Item 3.1 (v0.5): agent access-log entries carry the grantReference at
+   *  the event level so the responsible party is resolvable without opening
+   *  the nested gateCheckRecord. On gate-check events this duplicates
+   *  gateCheckRecord.grantReference; on capability-granted /
+   *  capability-revoked entries for agent contacts it stands alone. */
+  grantReference?:   string
   /** Phase 2 (Item 2.1): exposure-record events carry the structured
    *  snapshot. Attached to the handoff-completed entry's companion
    *  exposure-record event, one per revoked contact. */

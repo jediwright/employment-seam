@@ -226,7 +226,7 @@ export default function HandoffsTab({ docUrl }: { docUrl: AutomergeUrl }) {
           !isRevocationRef(contact.keyhiveCapabilityRef)
         ) {
           const priorRef = contact.keyhiveCapabilityRef
-          d.contacts[contact.contactId].keyhiveCapabilityRef = `revoked:${priorRef}`
+          d.contacts[contact.contactId].keyhiveCapabilityRef = `revoked-local:${priorRef}`
 
           // Capability-revoked: the ISSUED half (Item 1.2 — unchanged).
           d.accessLog.push({

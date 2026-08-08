@@ -88,13 +88,13 @@ export default function AccessLogTab({ docUrl }: { docUrl: AutomergeUrl }) {
                         Agent
                       </span>
                     )}
-                    {event.gateResult && (
+                    {event.gateCheckRecord?.gateResult && (
                       <span className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ${
-                        event.gateResult === 'pass'
+                        event.gateCheckRecord?.gateResult === 'pass'
                           ? 'bg-green-50 text-green-700 border border-green-200'
                           : 'bg-red-50 text-red-600 border border-red-200'
                       }`}>
-                        {event.gateResult}
+                        {event.gateCheckRecord?.gateResult}
                       </span>
                     )}
                     {project && (
