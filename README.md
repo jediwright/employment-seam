@@ -30,7 +30,7 @@ It is the first Pattern Commons entry where all four layers of the [Seam Stack](
 - Agent-class contacts (`seam:identityClass: Agent`) are structurally grantee-only: the type system makes attestation and account-submission authority unavailable to them, not merely unrendered in the UI (Principle 6: agents are governed parties, never authors of record)
 - Revocation follows a two-state model — `revoked-local` (seam fired, signal propagating) and `revoked-confirmed` (acknowledgment received) — so the gate can distinguish an unconfirmed revocation signal from a confirmed one and record the distinction in the access log
 
-The prototype implements build plan v0.5 items 1.3, 3.1, and 3.2 (33/33 tests passing). Items 1.1 (degraded-sync test) and 1.2 (two-state revocation confirmation in the degraded-connectivity scenario) remain unimplemented.
+The prototype implements build plan v0.5 items 1.3, 3.1, and 3.2 (33/33 tests passing). Items 1.1 and 1.2 — degraded-sync behavior and two-state revocation — are implemented in simulation (`degradedSync.test.ts`, 5/5 passing, commit `0c044bf`); the live-relay observation leg (DevTools throttling against the Subduction relay) is deferred as optional and not required for the essay's claim.
 
 See [`keyhive-employment-seam/README.md`](keyhive-employment-seam/README.md) for run instructions.
 
