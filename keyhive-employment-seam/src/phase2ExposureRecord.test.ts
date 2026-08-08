@@ -105,7 +105,7 @@ function makeDoc(contacts: Contact[], handoff: HandoffRecord): WorkerKnowledgeGr
 // ---------------------------------------------------------------------------
 
 function isRevocationRef(ref: string | undefined): boolean {
-  return !!ref && (ref.startsWith('revoked-confirmed:') || ref.startsWith('revoked:'))
+  return !!ref && (ref.startsWith('revoked-confirmed:') || ref.startsWith('revoked-local:'))
 }
 
 /**
@@ -144,7 +144,7 @@ function simulateSeamFire(
   Object.values(doc.contacts).forEach((contact) => {
     if (contact.keyhiveCapabilityRef && !isRevocationRef(contact.keyhiveCapabilityRef)) {
       const priorRef = contact.keyhiveCapabilityRef
-      doc.contacts[contact.contactId].keyhiveCapabilityRef = `revoked:${priorRef}`
+      doc.contacts[contact.contactId].keyhiveCapabilityRef = `revoked-local:${priorRef}`
 
       doc.accessLog.push({
         eventId:          crypto.randomUUID(),
@@ -268,9 +268,9 @@ describe('Phase 2 — exposure record at seam-fire (Item 2.1 acceptance)', () =>
   })
 
   it('already-revoked contacts are not re-revoked and produce no second exposure record', () => {
-    // c-1 already has a revoked: ref (issued half from Item 1.2)
+    // c-1 already has a revoked-local: ref (issued half from Item 1.2)
     const c1 = makeContact('c-1', false)
-    c1.keyhiveCapabilityRef = 'revoked:automerge:cap-c-1'
+    c1.keyhiveCapabilityRef = 'revoked-local:automerge:cap-c-1'
     const c2 = makeContact('c-2', true)
     const handoff = makeHandoff('proj-1', 'c-2')
     const doc     = makeDoc([c1, c2], handoff)
@@ -281,8 +281,8 @@ describe('Phase 2 — exposure record at seam-fire (Item 2.1 acceptance)', () =>
     // Only c-2 (the active capability) gets an exposure record
     expect(exposureEvents).toHaveLength(1)
     expect(exposureEvents[0].subjectContactId).toBe('c-2')
-    // c-1's ref is unchanged (still 'revoked:', not double-prefixed)
-    expect(doc.contacts['c-1'].keyhiveCapabilityRef).toBe('revoked:automerge:cap-c-1')
+    // c-1's ref is unchanged (still 'revoked-local:', not double-prefixed)
+    expect(doc.contacts['c-1'].keyhiveCapabilityRef).toBe('revoked-local:automerge:cap-c-1')
   })
 
   it('bundle hash changes when exposure records are included (hash commits to surface)', async () => {

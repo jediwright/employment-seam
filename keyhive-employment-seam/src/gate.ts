@@ -1,6 +1,6 @@
-// src/gate.ts — assertCapabilityCurrent() gate stub
-// Items 1.3 and 3.2, keyhive-employment-seam build plan v0.4.1 (2026-08-03),
-// item text Counter-Passed 2026-08-03 (R1 (b) / R2 (b) / R3 (a)).
+// src/gate.ts — assertCapabilityCurrent() gate implementation
+// Items 1.3 and 3.2, keyhive-employment-seam build plan v0.5 (2026-08-08).
+// Governing spec: pattern-commons-07-employment-seam-v0-5_2026-08-08.md
 //
 // WHY THIS FUNCTION EXISTS — the inference-flagging gap:
 // This gate is the concrete instantiation of the Agentic Accountability
@@ -19,24 +19,25 @@
 // a TTL, or any cached prior result. There is deliberately no memoization
 // and no validity window anywhere in this file.
 //
-// EVIDENCE-LAYER NOTE (build plan v0.4.1, §1.3 amendment):
-// Gate-check events — pass and block alike — are evidence-layer material by
-// the same logic as `seam:aiProvenance`: a descriptive record of what the
-// gate did, not an extension of the gate's own authorization logic. A
-// blocked action is governance evidence. Every invocation of this gate
-// therefore writes an access-log entry, including blocks.
+// GATE/EVIDENCE RELATIONSHIP (PC#7 v0.5, Principle 6):
+// assertCapabilityCurrent() (Governance/Boundary layer) and seam:aiProvenance
+// (Evidence layer) are an adjacent pair — the gate does not read
+// seam:aiProvenance; seam:aiProvenance carries no grant/revoke semantics.
+// Gate-check records (seam:gateCheckRecord) are first-class evidence-layer
+// material in the same evidentiary shape as seam:aiProvenance, without
+// either depending on the other.
 //
-// ONE-DIRECTIONAL DEPENDENCY (build plan v0.4.1, §1.3 / Item 3.2):
-// The gate does not inspect `seam:aiProvenance` (which is spec-layer and
-// not modeled in this prototype). Even where provenance is modeled, the
-// dependency stays one-directional: provenance and gate-checks are an
-// adjacent evidence pair, neither consulting the other to decide anything.
+// SPEC REFERENCE:
+// This gate implements the assertCapabilityCurrent() pattern specified in
+// pattern-commons-07-employment-seam-v0-5_2026-08-08.md (Governance layer,
+// per Principle 6: "Agents are governed parties, never authors of record").
 
 import type {
   WorkerKnowledgeGraph,
   Contact,
   AccessTier,
   GateResult,
+  GateCheckRecord,
   RevocationConfirmationState,
 } from './types'
 
@@ -53,17 +54,17 @@ const TIER_ORDER: Record<AccessTier, number> = {
 
 /**
  * Revocation-confirmation state — Item 1.2 (two-state revocation), built
- * 2026-08-03 against Item 1.1's degraded-sync findings (degradedSync.test.ts).
+ * 2026-08-03; Option A rename applied 2026-08-08 (build plan v0.5 §3).
  *
- * Two revocation states, per build plan v0.3 Item 1.2 and the Thread A
- * kickoff's naming:
- *   - `revoked:<ref>`            → 'issued'    (kickoff: "revoked-local" —
- *                                  seam fired, confirmation propagating)
- *   - `revoked-confirmed:<ref>`  → 'confirmed' (kickoff: "revoked-confirmed"
- *                                  — acknowledgment signal received)
+ * Two revocation states, per build plan v0.3 Item 1.2, aligned to the
+ * v0.5 spec's seam:agentRevocationState controlled vocabulary:
+ *   - `revoked-local:<ref>`      → 'issued'    (seam fired, confirmation
+ *                                  propagating; formerly prefix `revoked:`)
+ *   - `revoked-confirmed:<ref>`  → 'confirmed' (acknowledgment signal
+ *                                  received)
  *
- * Gate mapping (unchanged switch below): 'issued' → `blocked-unconfirmed`
- * (the gate refuses to act inside the propagation gap); 'confirmed' →
+ * Gate mapping (switch below): 'issued' → `blocked-unconfirmed` (the gate
+ * refuses to act inside the propagation gap); 'confirmed' →
  * `blocked-revoked` (revocation final on this replica's knowledge).
  *
  * ITEM 1.1 FINDING, BINDING HERE: this transport (BroadcastChannel,
@@ -82,18 +83,19 @@ export function revocationConfirmationState(
   const ref = contact.keyhiveCapabilityRef
   if (!ref) return 'none'
   if (ref.startsWith('revoked-confirmed:')) return 'confirmed'
-  if (ref.startsWith('revoked:')) return 'issued'
+  if (ref.startsWith('revoked-local:')) return 'issued'
   return 'none'
 }
 
 /**
  * True for a ref in EITHER revocation state. Callers that previously
- * checked `ref.startsWith('revoked:')` (e.g., the seam-fire loop) must use
- * this instead — a bare 'revoked:' check misses 'revoked-confirmed:' and
- * would double-prefix an already-confirmed revocation.
+ * checked a bare revocation prefix must use this instead — a bare check
+ * misses 'revoked-confirmed:' and would double-prefix an already-confirmed
+ * revocation. Option A (2026-08-08): checks 'revoked-local:' (was
+ * 'revoked:').
  */
 export function isRevocationRef(ref: string | undefined): boolean {
-  return !!ref && (ref.startsWith('revoked-confirmed:') || ref.startsWith('revoked:'))
+  return !!ref && (ref.startsWith('revoked-confirmed:') || ref.startsWith('revoked-local:'))
 }
 
 /**
@@ -113,6 +115,9 @@ export function isRevocationRef(ref: string | undefined): boolean {
  *
  * Returns 'confirmed' on transition; 'not-applicable' if the contact is
  * unknown, unrevoked, or already confirmed (idempotent — no double event).
+ *
+ * Option A (2026-08-08): checks and strips the `revoked-local:` prefix
+ * (was `revoked:`).
  */
 export function confirmRevocation(
   change: (mutate: (d: WorkerKnowledgeGraph) => void) => void,
@@ -125,10 +130,10 @@ export function confirmRevocation(
     const contact = d.contacts[contactId]
     if (!contact) return
     const ref = contact.keyhiveCapabilityRef
-    // Only an 'issued' revocation can be confirmed. ('revoked-confirmed:'
-    // does not match the bare 'revoked:' prefix — see state fn above.)
-    if (!ref || !ref.startsWith('revoked:')) return
-    const priorRef = ref.slice('revoked:'.length)
+    // Only an 'issued' (revoked-local:) revocation can be confirmed.
+    // ('revoked-confirmed:' does not match — see state fn above.)
+    if (!ref || !ref.startsWith('revoked-local:')) return
+    const priorRef = ref.slice('revoked-local:'.length)
     contact.keyhiveCapabilityRef = `revoked-confirmed:${priorRef}`
     d.accessLog.push({
       eventId:          crypto.randomUUID(),
@@ -150,11 +155,15 @@ export type CapabilityGate = {
    * an unexpired token (see header). Humans act through the tabs; no
    * human-driven UI path calls this in the current increment.
    *
-   * Every invocation writes an access-log entry, INCLUDING BLOCKS.
+   * Every invocation writes a seam:gateCheckRecord access-log entry,
+   * INCLUDING BLOCKS (per PC#7 v0.5, Principle 6). `grantReference` is a
+   * required argument — the record must resolve to the responsible legal
+   * party without external lookup.
    */
   assertCapabilityCurrent: (
     contactId: string,
     capability: AccessTier,
+    grantReference: string,
   ) => Promise<GateResult>
 }
 
@@ -170,17 +179,22 @@ export function createCapabilityGate(
   const assertCapabilityCurrent = async (
     contactId: string,
     capability: AccessTier,
+    grantReference: string,
   ): Promise<GateResult> => {
     // Fresh read per invocation — execution-state check, not token check.
     const doc = read()
     const contact = doc?.contacts[contactId]
 
     let result: GateResult
+    let revocationStateReference: string | undefined
+
     if (!contact || !contact.keyhiveCapabilityRef) {
       // No contact on record, or no capability ever granted: no current
-      // capability exists. At stub level this collapses into
+      // capability exists. At this level this collapses into
       // `blocked-revoked` ("no current capability on record") rather than
-      // adding a fourth result value beyond the Counter-Passed item text.
+      // adding a fourth result value beyond the spec's controlled
+      // vocabulary. No revocationStateReference — nothing on record to
+      // reference.
       result = 'blocked-revoked'
     } else {
       switch (revocationConfirmationState(contact)) {
@@ -188,9 +202,11 @@ export function createCapabilityGate(
           // Inside the propagation gap: revocation issued locally,
           // confirmation unavailable. The gate refuses to act here.
           result = 'blocked-unconfirmed'
+          revocationStateReference = contact.keyhiveCapabilityRef
           break
         case 'confirmed':
           result = 'blocked-revoked'
+          revocationStateReference = contact.keyhiveCapabilityRef
           break
         case 'none': {
           const held = TIER_ORDER[contact.accessTier] >= TIER_ORDER[capability]
@@ -200,19 +216,36 @@ export function createCapabilityGate(
       }
     }
 
-    // Evidence layer: every check is recorded, pass and block alike.
+    // Evidence layer: every check is recorded, pass and block alike, as a
+    // seam:gateCheckRecord with all required fields per PC#7 v0.5.
     const now = new Date().toISOString()
+    const agentDID = contact?.keyhiveCapabilityRef
+      ? contact.keyhiveCapabilityRef.replace(/^revoked-(local|confirmed):/, '')
+      : contactId
+
+    const gateCheckRecord: GateCheckRecord = {
+      agentDID,
+      grantReference,
+      capabilityName:      capability,
+      invocationTimestamp: now,
+      gateResult:          result,
+      // Optional field set conditionally, never assigned `undefined` —
+      // Automerge rejects undefined property values.
+      ...(revocationStateReference !== undefined
+        ? { revocationStateReference }
+        : {}),
+    }
+
     change((d) => {
-      // Note: optional fields are set conditionally, never assigned
-      // `undefined` — Automerge rejects undefined property values.
       d.accessLog.push({
         eventId:          crypto.randomUUID(),
         timestamp:        now,
         eventType:        'gate-check',
         subjectContactId: contactId,
         ...(contact ? { contactClass: contact.contactClass ?? 'human' } : {}),
-        gateResult:       result,
-        notes:            `Gate check for capability '${capability}': ${result}.`,
+        gateCheckRecord,
+        grantReference,
+        notes: `Gate check for capability '${capability}': ${result}. Grant: ${grantReference}.`,
       })
     })
 
@@ -223,7 +256,16 @@ export function createCapabilityGate(
 }
 
 // ---------------------------------------------------------------------------
-// Item 3.2 — AgentActionContext (stub-level gate wiring)
+// Item 3.2 — AgentActionContext (gate wiring, stub-level)
+//
+// Spec reference: pattern-commons-07-employment-seam-v0-5_2026-08-08.md,
+// Principle 6: "Agents are governed parties, never authors of record."
+//
+// Every agent action context passes through assertCapabilityCurrent(); the
+// result is logged as a seam:gateCheckRecord; this is the spec's "agents
+// are governed parties" commitment expressed at the code level. The gate
+// does not inspect seam:aiProvenance in either direction — the gate/
+// evidence pair is adjacent, not dependent (see header).
 //
 // No agent ACTIONS exist in this increment — agents are grantees, not
 // actors. The enforcement point, per v0.3 Item 3.2 option (b): any future
@@ -233,7 +275,7 @@ export function createCapabilityGate(
 // module-private, so the type is unconstructible outside this file; the
 // only producer is openAgentActionContext, which gates on
 // assertCapabilityCurrent() ONLY — one-directional, no aiProvenance
-// inspection (see header).
+// inspection.
 //
 // Convention (lint-comment level, stated for future increments): agent-side
 // action code takes `ctx: AgentActionContext` as its first parameter.
@@ -243,12 +285,16 @@ const GATE_PASSED = Symbol('agent-action:gate-passed')
 
 export type AgentActionContext = {
   readonly [GATE_PASSED]: true
-  readonly contactId:     string
-  readonly capability:    AccessTier
+  readonly contactId:      string
+  readonly capability:     AccessTier
+  /** The grant this context was opened under — flows into every
+   *  seam:gateCheckRecord the context's gate check produced, so the
+   *  responsible legal party travels with the authorization. */
+  readonly grantReference: string
   /** When the gate check that authorized this context ran. Descriptive
    *  record only — NOT a validity window. A new action requires a new
    *  context (and therefore a new gate check). */
-  readonly gateCheckedAt: string
+  readonly gateCheckedAt:  string
 }
 
 /**
@@ -259,13 +305,15 @@ export async function openAgentActionContext(
   gate: CapabilityGate,
   contactId: string,
   capability: AccessTier,
+  grantReference: string,
 ): Promise<AgentActionContext | null> {
-  const result = await gate.assertCapabilityCurrent(contactId, capability)
+  const result = await gate.assertCapabilityCurrent(contactId, capability, grantReference)
   if (result !== 'pass') return null
   return {
     [GATE_PASSED]:  true,
     contactId,
     capability,
+    grantReference,
     gateCheckedAt:  new Date().toISOString(),
   }
 }

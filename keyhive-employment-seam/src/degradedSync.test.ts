@@ -113,7 +113,7 @@ function makeSyncedPair(profile: NetworkProfile) {
   const fireSeamAtWorker = (): { revokedAtMs: number; delivered: Promise<number> } => {
     const revokedAtMs = Date.now()
     const c = worker.doc.contacts[contactId]
-    c.keyhiveCapabilityRef = 'revoked:automerge:cap1'
+    c.keyhiveCapabilityRef = 'revoked-local:automerge:cap1'
     worker.accessLog.push({
       eventId: crypto.randomUUID(),
       timestamp: new Date(revokedAtMs).toISOString(),
@@ -124,7 +124,7 @@ function makeSyncedPair(profile: NetworkProfile) {
     })
     const delivered = new Promise<number>((resolve) => {
       const deliver = () => {
-        agent.doc.contacts[contactId].keyhiveCapabilityRef = 'revoked:automerge:cap1'
+        agent.doc.contacts[contactId].keyhiveCapabilityRef = 'revoked-local:automerge:cap1'
         resolve(Date.now())
       }
       if (profile.latencyMs === null) held.push(deliver)
@@ -169,8 +169,8 @@ describe.each(PROFILES)('degraded sync — revocation arrives after stale-state 
     const { contactId, worker, agent, fireSeamAtWorker, reconnect } = makeSyncedPair(profile)
 
     // T0 — agent acts on current (soon-to-be-stale) capability state.
-    expect(await agent.gate.assertCapabilityCurrent(contactId, 'read-bundle')).toBe('pass')
-    const ctx = await openAgentActionContext(agent.gate, contactId, 'read-bundle')
+    expect(await agent.gate.assertCapabilityCurrent(contactId, 'read-bundle', 'did:key:zTestGranter')).toBe('pass')
+    const ctx = await openAgentActionContext(agent.gate, contactId, 'read-bundle', 'did:key:zTestGranter')
     expect(ctx).not.toBeNull() // the agent has acted
 
     // T1 — worker fires the seam. Signal enters the (degraded) channel.
@@ -178,14 +178,14 @@ describe.each(PROFILES)('degraded sync — revocation arrives after stale-state 
 
     // Worker-side gate refuses IMMEDIATELY — it is inside the propagation
     // gap it created, and it knows it (issued, unconfirmed → blocked).
-    expect(await worker.gate.assertCapabilityCurrent(contactId, 'read-bundle')).toBe('blocked-unconfirmed')
+    expect(await worker.gate.assertCapabilityCurrent(contactId, 'read-bundle', 'did:key:zTestGranter')).toBe('blocked-unconfirmed')
 
     // T1..T2 — THE GAP. The agent-side gate still passes: the signal has
     // not arrived, so current local state honestly shows the grant. This
     // is the physics the gate cannot beat — recorded, not hidden.
     let staleChecksDuringGap = 0
     if (profile.latencyMs === null || profile.latencyMs >= 100) {
-      const during = await agent.gate.assertCapabilityCurrent(contactId, 'read-bundle')
+      const during = await agent.gate.assertCapabilityCurrent(contactId, 'read-bundle', 'did:key:zTestGranter')
       expect(during).toBe('pass') // stale pass INSIDE the gap — the honest finding
       staleChecksDuringGap = 1
     }
@@ -199,12 +199,12 @@ describe.each(PROFILES)('degraded sync — revocation arrives after stale-state 
 
     // T3 — the IMMEDIATELY NEXT invocation blocks. Exposure beyond
     // physics is one gate check, not one token lifetime.
-    const firstCheckAfterArrival = await agent.gate.assertCapabilityCurrent(contactId, 'read-bundle')
+    const firstCheckAfterArrival = await agent.gate.assertCapabilityCurrent(contactId, 'read-bundle', 'did:key:zTestGranter')
     const firstBlockAtMs = Date.now()
     expect(firstCheckAfterArrival).toBe('blocked-unconfirmed')
 
     // And AgentActionContext is unobtainable from here on:
-    expect(await openAgentActionContext(agent.gate, contactId, 'read-bundle')).toBeNull()
+    expect(await openAgentActionContext(agent.gate, contactId, 'read-bundle', 'did:key:zTestGranter')).toBeNull()
 
     // --- Access log: the gap is visible in the record ---
     // Worker side: the revocation event exists, timestamped independently.
@@ -212,8 +212,8 @@ describe.each(PROFILES)('degraded sync — revocation arrives after stale-state 
     // Agent side: gate-check entries for the stale pass(es) AND the block —
     // a blocked action is governance evidence, and so is a stale pass.
     const agentGateChecks = agent.accessLog.filter((e) => e.eventType === 'gate-check')
-    expect(agentGateChecks.filter((e) => e.gateResult === 'pass').length).toBeGreaterThanOrEqual(1)
-    expect(agentGateChecks.some((e) => e.gateResult === 'blocked-unconfirmed')).toBe(true)
+    expect(agentGateChecks.filter((e) => e.gateCheckRecord!.gateResult === 'pass').length).toBeGreaterThanOrEqual(1)
+    expect(agentGateChecks.some((e) => e.gateCheckRecord!.gateResult === 'blocked-unconfirmed')).toBe(true)
     // Timestamps on both sides are independent ISO strings; the worker
     // revocation → agent first-block delta is the measured gap:
     timings.push({
@@ -244,7 +244,7 @@ describe('per-invocation check vs. TTL token (Parakhin contrast)', () => {
     // TTL: still authorizing — unexpired token, revocation invisible to it.
     expect(ttlAuthorizes()).toBe(true)
     // Gate: blocked on the very next invocation.
-    expect(await agent.gate.assertCapabilityCurrent(contactId, 'read-bundle')).toBe('blocked-unconfirmed')
+    expect(await agent.gate.assertCapabilityCurrent(contactId, 'read-bundle', 'did:key:zTestGranter')).toBe('blocked-unconfirmed')
     // Under TTL, exposure = max(propagation, remaining TTL); under the
     // per-invocation gate, exposure = propagation, exactly.
   })
@@ -275,7 +275,7 @@ describe('two-state revocation under degraded sync (Item 1.2 re-execution)', () 
     // "issued — propagation unconfirmed on this transport."
     expect(revocationConfirmationState(worker.doc.contacts[contactId])).toBe('issued')
     expect(revocationConfirmationState(agent.doc.contacts[contactId])).toBe('issued')
-    expect(await worker.gate.assertCapabilityCurrent(contactId, 'read-bundle')).toBe('blocked-unconfirmed')
+    expect(await worker.gate.assertCapabilityCurrent(contactId, 'read-bundle', 'did:key:zTestGranter')).toBe('blocked-unconfirmed')
 
     // CONFIRMATION — simulating the future acknowledgment signal Item 1.1
     // found absent from the transport. The basis is named; the event gets
@@ -290,7 +290,7 @@ describe('two-state revocation under degraded sync (Item 1.2 re-execution)', () 
     expect(revocationConfirmationState(worker.doc.contacts[contactId])).toBe('confirmed')
     // Gate mapping flips: issued → blocked-unconfirmed became
     // confirmed → blocked-revoked.
-    expect(await worker.gate.assertCapabilityCurrent(contactId, 'read-bundle')).toBe('blocked-revoked')
+    expect(await worker.gate.assertCapabilityCurrent(contactId, 'read-bundle', 'did:key:zTestGranter')).toBe('blocked-revoked')
 
     // BOTH EVENTS in the log, independent timestamps — the delta between
     // them is the issued→confirmed propagation gap, made visible.

@@ -9,6 +9,7 @@ import type {
   AccessTier,
   RelationshipType,
 } from './types'
+import { isRevocationRef } from './gate'
 const CONTACT_CLASS_LABELS: Record<ContactClass, string> = {
   human: 'Human',
   agent: 'Agent (automated system)',
@@ -29,7 +30,7 @@ const ACCESS_TIER_LABELS: Record<AccessTier, string> = {
 function capabilityState(ref?: string): { label: string; classes: string } {
   if (!ref)
     return { label: 'No cryptographic access', classes: 'bg-amber-50 text-amber-700' }
-  if (ref.startsWith('revoked:'))
+  if (isRevocationRef(ref))
     return { label: 'Access revoked', classes: 'bg-red-50 text-red-600' }
   return { label: 'Access granted', classes: 'bg-green-50 text-green-700' }
 }
@@ -121,7 +122,7 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
     const priorRef = contact.keyhiveCapabilityRef
     const now      = new Date().toISOString()
     changeDoc((d) => {
-      d.contacts[contact.contactId].keyhiveCapabilityRef = `revoked:${priorRef}`
+      d.contacts[contact.contactId].keyhiveCapabilityRef = `revoked-local:${priorRef}`
       d.identity.lastModified = now
       d.accessLog.push({
         eventId:          crypto.randomUUID(),
@@ -264,8 +265,8 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
       <div className="space-y-3">
         {contacts.map((contact) => {
           const cap       = capabilityState(contact.keyhiveCapabilityRef)
-          const isGranted = !!contact.keyhiveCapabilityRef && !contact.keyhiveCapabilityRef.startsWith('revoked:')
-          const isRevoked = contact.keyhiveCapabilityRef?.startsWith('revoked:') ?? false
+          const isGranted = !!contact.keyhiveCapabilityRef && !isRevocationRef(contact.keyhiveCapabilityRef)
+          const isRevoked = isRevocationRef(contact.keyhiveCapabilityRef)
           const isLoading = capabilityLoading === contact.contactId
           return (
             <div key={contact.contactId} className="bg-white border border-gray-200 rounded-lg p-4">
