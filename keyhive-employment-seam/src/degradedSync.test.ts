@@ -76,6 +76,7 @@ function makeContact(contactId: string, ref: string | undefined): Contact {
     notes: '',
     createdAt: new Date().toISOString(),
     contactClass: 'agent',
+    identityClass: 'Agent' as const,
   }
 }
 

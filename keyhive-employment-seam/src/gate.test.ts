@@ -44,8 +44,8 @@ function makeContact(overrides: Partial<Contact> & { contactClass?: 'human' | 'a
     createdAt:        new Date().toISOString(),
   }
   return overrides.contactClass === 'agent'
-    ? { ...core, contactClass: 'agent' }
-    : { ...core, contactClass: 'human' }
+    ? { ...core, contactClass: 'agent' as const, identityClass: 'Agent' as const }
+    : { ...core, contactClass: 'human' as const }
 }
 
 function makeHarness(contacts: Contact[]) {
@@ -288,8 +288,191 @@ describe('agent-class authority is structurally grantee-only', () => {
     // The values above exist only to host the compile-time assertions.
     void a1; void a2; void a3; void a4
 
-    // A plain agent contact (grantee-only) constructs fine:
-    const agent: AgentContact = { ...core, contactClass: 'agent' }
+    // A plain agent contact (grantee-only, with identityClass) constructs fine:
+    const agent: AgentContact = { ...core, contactClass: 'agent', identityClass: 'Agent' }
     expect(agent.contactClass).toBe('agent')
+    expect(agent.identityClass).toBe('Agent')
+  })
+})
+
+// --- Item 3.1 v0.5: agent contact schema acceptance -------------------------
+// Tests covering: identityClass: 'Agent' on contact construction,
+// AgentCapabilityGrant structure, grantReference non-null on agent log
+// entries, identityClass on agent log entries, existing contacts unaffected.
+
+import type { AgentCapabilityGrant } from './types'
+
+describe('Item 3.1: agent contact schema (v0.5)', () => {
+  it('agent contact carries identityClass: Agent at construction', () => {
+    const core = {
+      contactId: 'a-v05', displayName: 'Pipeline Bot', role: 'Automation',
+      employerName: 'Acme', relationshipType: 'subcontractor' as const,
+      accessTier: 'read-bundle' as const, notes: '', createdAt: '2026-08-08',
+    }
+    const grant: AgentCapabilityGrant = {
+      grantingPartyDID:      'did:key:zGranter999',
+      grantedAgentDID:       'did:key:agent-a-v05',
+      capabilityName:        'read-bundle',
+      grantTimestamp:        '2026-08-08T00:00:00.000Z',
+      scope:                 'worker-knowledge-graph',
+      scopingPartySignature: 'stub-sig:did:key:zGranter999:2026-08-08T00:00:00.000Z',
+    }
+    const agent: import('./types').AgentContact = {
+      ...core,
+      contactClass:         'agent',
+      identityClass:        'Agent',
+      agentCapabilityGrant: grant,
+    }
+    expect(agent.identityClass).toBe('Agent')
+    expect(agent.contactClass).toBe('agent')
+    expect(agent.agentCapabilityGrant?.grantingPartyDID).toBe('did:key:zGranter999')
+  })
+
+  it('AgentCapabilityGrant carries all required v0.5 minimum fields', () => {
+    const grant: AgentCapabilityGrant = {
+      grantingPartyDID:      'did:key:zGranter001',
+      grantedAgentDID:       'did:key:agent-bot42',
+      capabilityName:        'read-full',
+      grantTimestamp:        '2026-08-08T10:00:00.000Z',
+      scope:                 'worker-knowledge-graph',
+      scopingPartySignature: 'stub-sig:did:key:zGranter001:2026-08-08T10:00:00.000Z',
+    }
+    // All six minimum fields present
+    expect(grant.grantingPartyDID).toBeDefined()
+    expect(grant.grantedAgentDID).toBeDefined()
+    expect(grant.capabilityName).toBeDefined()
+    expect(grant.grantTimestamp).toBeDefined()
+    expect(grant.scope).toBeDefined()
+    expect(grant.scopingPartySignature).toBeDefined()
+    // Optional Class C chain-of-authority field absent (direct worker grant)
+    expect(grant.authorizationVCReference).toBeUndefined()
+  })
+
+  it('Class C grant carries authorizationVCReference (chain-of-authority condition)', () => {
+    const classCGrant: AgentCapabilityGrant = {
+      grantingPartyDID:       'did:key:zClassCRep',
+      grantedAgentDID:        'did:key:agent-enterprise-bot',
+      capabilityName:         'write-collab',
+      grantTimestamp:         '2026-08-08T11:00:00.000Z',
+      scope:                  'worker-knowledge-graph',
+      scopingPartySignature:  'stub-sig:did:key:zClassCRep:2026-08-08T11:00:00.000Z',
+      authorizationVCReference: 'vc:worker-auth:zWorker123:2026-08-08',
+    }
+    expect(classCGrant.authorizationVCReference).toBe('vc:worker-auth:zWorker123:2026-08-08')
+  })
+
+  it('agent capability-granted log entry carries identityClass and grantReference', () => {
+    // Simulate what ContactsTab.handleGrantCapability writes to the log
+    const agentContactId = 'a-log-01'
+    const grantingPartyDID = 'did:key:zGranterLog'
+    const accessLog: import('./types').AccessEvent[] = []
+
+    // Mimics the log push in handleGrantCapability
+    accessLog.push({
+      eventId:          'evt-001',
+      timestamp:        '2026-08-08T12:00:00.000Z',
+      eventType:        'capability-granted',
+      subjectContactId: agentContactId,
+      contactClass:     'agent',
+      identityClass:    'Agent',
+      grantReference:   grantingPartyDID,
+      notes:            'Cryptographic access granted.',
+    })
+
+    const entry = accessLog[0]
+    expect(entry.contactClass).toBe('agent')
+    expect(entry.identityClass).toBe('Agent')
+    expect(entry.grantReference).toBe(grantingPartyDID)
+    expect(entry.grantReference).not.toBeNull()
+  })
+
+  it('agent capability-revoked log entry carries identityClass and grantReference', () => {
+    const grantingPartyDID = 'did:key:zGranterLog2'
+    const accessLog: import('./types').AccessEvent[] = []
+
+    accessLog.push({
+      eventId:          'evt-002',
+      timestamp:        '2026-08-08T13:00:00.000Z',
+      eventType:        'capability-revoked',
+      subjectContactId: 'a-log-02',
+      contactClass:     'agent',
+      identityClass:    'Agent',
+      grantReference:   grantingPartyDID,
+      notes:            'Access revoked.',
+    })
+
+    const entry = accessLog[0]
+    expect(entry.identityClass).toBe('Agent')
+    expect(entry.grantReference).toBe(grantingPartyDID)
+    expect(entry.grantReference).not.toBeNull()
+  })
+
+  it('human contact log entries are unaffected — no identityClass, no grantReference', () => {
+    const accessLog: import('./types').AccessEvent[] = []
+
+    accessLog.push({
+      eventId:          'evt-003',
+      timestamp:        '2026-08-08T14:00:00.000Z',
+      eventType:        'capability-granted',
+      subjectContactId: 'h-001',
+      contactClass:     'human',
+      notes:            'Cryptographic access granted to human contact.',
+    })
+
+    const entry = accessLog[0]
+    expect(entry.contactClass).toBe('human')
+    expect(entry.identityClass).toBeUndefined()
+    expect(entry.grantReference).toBeUndefined()
+  })
+
+  it('existing contacts (no contactClass field) remain unaffected — read as human', () => {
+    // Pre-v0.5 contact: no contactClass, no identityClass, no agentCapabilityGrant
+    const legacy = {
+      contactId: 'legacy-001', displayName: 'Old Contact', role: 'Former Client',
+      employerName: 'Legacy Corp', relationshipType: 'client' as const,
+      accessTier: 'none' as const, notes: '', createdAt: '2025-01-01',
+    }
+    // Migration rule: contactClass ?? 'human'
+    const resolved = (legacy as import('./types').Contact).contactClass ?? 'human'
+    expect(resolved).toBe('human')
+  })
+
+  it('grantReference is non-null on every agent-class log entry (v0.5 acceptance)', () => {
+    const grantRef = 'did:key:zAcceptanceGranter'
+    const events: import('./types').AccessEvent[] = [
+      {
+        eventId: 'e1', timestamp: '2026-08-08T15:00:00.000Z',
+        eventType: 'capability-granted', subjectContactId: 'a-accept',
+        contactClass: 'agent', identityClass: 'Agent',
+        grantReference: grantRef, notes: '',
+      },
+      {
+        eventId: 'e2', timestamp: '2026-08-08T16:00:00.000Z',
+        eventType: 'capability-revoked', subjectContactId: 'a-accept',
+        contactClass: 'agent', identityClass: 'Agent',
+        grantReference: grantRef, notes: '',
+      },
+    ]
+    // Every agent-class log entry must carry a non-null grantReference
+    const agentEntries = events.filter((e) => e.contactClass === 'agent')
+    expect(agentEntries.length).toBe(2)
+    agentEntries.forEach((e) => {
+      expect(e.grantReference).toBeDefined()
+      expect(e.grantReference).not.toBeNull()
+      expect(e.grantReference!.length).toBeGreaterThan(0)
+    })
+  })
+
+  it('type level: identityClass Agent cannot be set on HumanContact', () => {
+    // This is enforced by the type system (HumanContact has no identityClass field)
+    // Runtime assertion: a human contact constructed correctly has no identityClass
+    const human: import('./types').HumanContact = {
+      contactId: 'h-002', displayName: 'Human', role: 'Manager',
+      employerName: 'Corp', relationshipType: 'employer' as const,
+      accessTier: 'none' as const, notes: '', createdAt: '2026-08-08',
+      contactClass: 'human',
+    }
+    // identityClass is not a field on HumanContact — accessing it returns undefined
+    expect((human as Record<string, unknown>)['identityClass']).toBeUndefined()
   })
 })

@@ -8,6 +8,7 @@ import type {
   ContactClass,
   AccessTier,
   RelationshipType,
+  AgentCapabilityGrant,
 } from './types'
 import { isRevocationRef } from './gate'
 const CONTACT_CLASS_LABELS: Record<ContactClass, string> = {
@@ -34,6 +35,31 @@ function capabilityState(ref?: string): { label: string; classes: string } {
     return { label: 'Access revoked', classes: 'bg-red-50 text-red-600' }
   return { label: 'Access granted', classes: 'bg-green-50 text-green-700' }
 }
+
+/**
+ * Build a stub AgentCapabilityGrant at contact-creation time.
+ * The grantingPartyDID comes from the form input (required for agent contacts).
+ * The grantedAgentDID is stubbed — it will be enriched with the actual
+ * keyhiveCapabilityRef value when the capability is granted.
+ * Prototype note: scopingPartySignature is a deterministic stub; not
+ * cryptographically valid but structurally present per v0.5 conformance.
+ */
+function makeStubGrant(
+  grantingPartyDID: string,
+  contactId: string,
+  accessTier: AccessTier,
+  now: string,
+): AgentCapabilityGrant {
+  return {
+    grantingPartyDID,
+    grantedAgentDID:       `did:key:agent-${contactId}`,
+    capabilityName:        accessTier,
+    grantTimestamp:        now,
+    scope:                 'worker-knowledge-graph',
+    scopingPartySignature: `stub-sig:${grantingPartyDID}:${now}`,
+  }
+}
+
 export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
   const [doc, changeDoc] = useDocument<WorkerKnowledgeGraph>(docUrl)
   const repo             = useRepo()
@@ -48,6 +74,9 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
   const [contactClass, setContactClass]       = useState<ContactClass>('human')
   const [accessTier, setAccessTier]           = useState<AccessTier>('none')
   const [notes, setNotes]                     = useState('')
+  // Item 3.1: agent-only form field — granting-party DID / grant reference.
+  // Required when contactClass === 'agent'; ignored for human contacts.
+  const [grantReference, setGrantReference]   = useState('')
   if (!doc) return null
   const contacts = Object.values(doc.contacts)
   // --- Validation ---
@@ -56,6 +85,10 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
     if (!displayName.trim()) e.displayName = 'Name is required'
     if (!role.trim())         e.role = 'Role is required'
     if (!employerName.trim()) e.employerName = 'Employer is required'
+    // Item 3.1: grant reference is required for agent-class contacts so the
+    // responsible party is resolvable from creation — not deferred to grant time.
+    if (contactClass === 'agent' && !grantReference.trim())
+      e.grantReference = 'Grant reference (granting-party DID) is required for agent contacts'
     return e
   }
   // --- Add contact (data only; capability ungoverned until worker explicitly grants) ---
@@ -75,12 +108,23 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
         notes:            notes.trim(),
         createdAt:        now,
       }
-      // Item 3.1: discriminated construction. The agent branch cannot carry
-      // recordSpeechAuthority — typed `never` in the schema, so attempting
-      // to attach any attestation/account-submission authority to an
-      // agent-class contact fails at the type level, not the UI level.
+      // Item 3.1: discriminated construction conforming to PC#7 v0.5 schema.
+      // Agent branch: identityClass: 'Agent' (seam:identityClass controlled vocab)
+      // and agentCapabilityGrant stub with minimum required fields.
+      // The recordSpeechAuthority path is typed `never` on AgentContact —
+      // grantee-only at the type level, not the UI level (Principle 6).
       const contact: Contact = contactClass === 'agent'
-        ? { ...core, contactClass: 'agent' }
+        ? {
+            ...core,
+            contactClass:           'agent',
+            identityClass:          'Agent',
+            agentCapabilityGrant:   makeStubGrant(
+              grantReference.trim(),
+              contactId,
+              accessTier,
+              now,
+            ),
+          }
         : { ...core, contactClass: 'human' }
       d.contacts[contactId]    = contact
       d.identity.lastModified  = now
@@ -88,7 +132,7 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
     })
     setDisplayName(''); setRole(''); setEmployerName('')
     setRelationshipType('colleague'); setContactClass('human')
-    setAccessTier('none'); setNotes('')
+    setAccessTier('none'); setNotes(''); setGrantReference('')
     setErrors({}); setShowForm(false)
   }
   // --- Grant capability (worker-initiated; explicit governance action; logged) ---
@@ -101,12 +145,27 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
       changeDoc((d) => {
         d.contacts[contact.contactId].keyhiveCapabilityRef = capRef
         d.identity.lastModified = now
+        // Item 3.1: for agent contacts, enrich agentCapabilityGrant with the
+        // actual keyhiveCapabilityRef as grantedAgentDID, and record
+        // grantReference (from the stub grant) on the access-log entry.
+        const isAgent = (contact.contactClass ?? 'human') === 'agent'
+        const agentContact = isAgent ? d.contacts[contact.contactId] as (typeof contact & { contactClass: 'agent' }) : null
+        if (agentContact && agentContact.agentCapabilityGrant) {
+          agentContact.agentCapabilityGrant.grantedAgentDID = capRef
+        }
+        const grantRef = isAgent && contact.contactClass === 'agent' && contact.agentCapabilityGrant
+          ? contact.agentCapabilityGrant.grantingPartyDID
+          : undefined
         d.accessLog.push({
           eventId:          crypto.randomUUID(),
           timestamp:        now,
           eventType:        'capability-granted',
           subjectContactId: contact.contactId,
           contactClass:     contact.contactClass ?? 'human',
+          // Item 3.1: identityClass on agent access-log entries
+          ...(isAgent ? { identityClass: 'Agent' as const } : {}),
+          // Item 3.1: grantReference non-null on agent-class access-log entries
+          ...(grantRef ? { grantReference: grantRef } : {}),
           notes:            `Cryptographic access granted. Capability ref: ${capRef}`,
         })
       })
@@ -124,12 +183,20 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
     changeDoc((d) => {
       d.contacts[contact.contactId].keyhiveCapabilityRef = `revoked-local:${priorRef}`
       d.identity.lastModified = now
+      const isAgent = (contact.contactClass ?? 'human') === 'agent'
+      const grantRef = isAgent && contact.contactClass === 'agent' && contact.agentCapabilityGrant
+        ? contact.agentCapabilityGrant.grantingPartyDID
+        : undefined
       d.accessLog.push({
         eventId:          crypto.randomUUID(),
         timestamp:        now,
         eventType:        'capability-revoked',
         subjectContactId: contact.contactId,
         contactClass:     contact.contactClass ?? 'human',
+        // Item 3.1: identityClass on agent access-log entries
+        ...(isAgent ? { identityClass: 'Agent' as const } : {}),
+        // Item 3.1: grantReference non-null on agent-class access-log entries
+        ...(grantRef ? { grantReference: grantRef } : {}),
         notes:            `Access revoked. Prior ref preserved: ${priorRef}`,
       })
     })
@@ -196,10 +263,29 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
                 <p className="text-xs text-gray-400 mt-1">
                   Agent-class contacts are grantee-only: they can hold and lose
                   cryptographic access, but structurally cannot attest, submit an
-                  account, or provide separation-cause input.
+                  account, or provide separation-cause input (Principle 6).
                 </p>
               )}
             </div>
+            {/* Item 3.1: grant reference field — agent contacts only */}
+            {contactClass === 'agent' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Granting-party DID / grant reference *
+                </label>
+                <input
+                  value={grantReference}
+                  onChange={(e) => setGrantReference(e.target.value)}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  placeholder="did:key:z… or grant identifier"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  The DID or identifier of the party authorizing this agent's access.
+                  Required — makes the responsible party resolvable from the record.
+                </p>
+                {errors.grantReference && <p className="text-red-500 text-xs mt-1">{errors.grantReference}</p>}
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Relationship</label>
@@ -268,6 +354,11 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
           const isGranted = !!contact.keyhiveCapabilityRef && !isRevocationRef(contact.keyhiveCapabilityRef)
           const isRevoked = isRevocationRef(contact.keyhiveCapabilityRef)
           const isLoading = capabilityLoading === contact.contactId
+          const isAgent   = (contact.contactClass ?? 'human') === 'agent'
+          // Item 3.1: surface grant reference from agentCapabilityGrant for display
+          const grantRef  = isAgent && contact.contactClass === 'agent'
+            ? contact.agentCapabilityGrant?.grantingPartyDID
+            : undefined
           return (
             <div key={contact.contactId} className="bg-white border border-gray-200 rounded-lg p-4">
               <div className="flex justify-between items-start gap-4">
@@ -275,7 +366,7 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <h3 className="font-medium text-gray-900">{contact.displayName}</h3>
-                    {(contact.contactClass ?? 'human') === 'agent' && (
+                    {isAgent && (
                       <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
                         Agent
                       </span>
@@ -295,6 +386,12 @@ export default function ContactsTab({ docUrl }: { docUrl: AutomergeUrl }) {
                   </div>
                   {contact.notes && (
                     <p className="text-sm text-gray-600 mt-2">{contact.notes}</p>
+                  )}
+                  {/* Item 3.1: grant reference display on agent contact cards */}
+                  {grantRef && (
+                    <p className="text-xs text-gray-400 mt-1 font-mono truncate" title={grantRef}>
+                      Grant: {grantRef}
+                    </p>
                   )}
                   {/* Capability badge */}
                   <span className={`inline-block mt-2 text-xs font-medium px-2 py-0.5 rounded-full ${cap.classes}`}>

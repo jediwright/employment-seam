@@ -34,21 +34,24 @@ export type Project = {
 export type ProjectStatus = 'active' | 'complete' | 'handed-off' | 'pre-empted'
 
 // ---------------------------------------------------------------------------
-// Contact model — Item 3.1 (build plan v0.4.1, Counter-Passed 2026-08-03)
+// Contact model — Item 3.1 (build plan v0.5, PC#7 v0.5, 2026-08-08)
 //
 // contactClass distinguishes human contacts from agent-class (automated
 // system) contacts. Migration rule: existing contacts have no contactClass
 // field and READ AS 'human' — resolve with `contact.contactClass ?? 'human'`.
 //
 // An agent-class contact's authority is structurally scoped to GRANTEE-ONLY
-// at the type level. It cannot be constructed as a holder of any Class A
-// sub-role (A1–A6), cannot attest, cannot submit a worker- or employer-side
-// account, cannot provide separation-cause input. This is a type-system
-// constraint, not a UI-layer restriction: the record-speech authority path
-// is typed `never` on AgentContact — unavailable, not merely unrendered.
-// (Spec grounding: PC#7 v0.4.1 identity-class pattern; the prototype's
-// first-class-contact identity choice is provisional pending the queued
-// PC#7 v0.5 attribution ruling — see build plan v0.4.1 §1.2.)
+// at the type level (Principle 6: "Agents are governed parties, never authors
+// of record"). It cannot be constructed as a holder of any Class A sub-role
+// (A1–A6), cannot attest, cannot submit a worker- or employer-side account,
+// cannot provide separation-cause input. This is a type-system constraint,
+// not a UI-layer restriction: the record-speech authority path is typed
+// `never` on AgentContact — unavailable, not merely unrendered.
+//
+// v0.5 additions (Item 3.1):
+//   identityClass: 'Agent'           — seam:identityClass controlled vocab
+//   AgentCapabilityGrant              — capability grant reference type
+//   agentCapabilityGrant              — field linking AgentContact to grant
 // ---------------------------------------------------------------------------
 
 export type ContactClass = 'human' | 'agent'
@@ -67,6 +70,47 @@ export type RecordSpeechAuthority =
   | 'account-submission'
   | 'separation-cause-input'
   | ClassASubRole
+
+/**
+ * seam:agentCapabilityGrant — links an agent-class contact to the grant
+ * that authorizes its access. Minimum fields per PC#7 v0.5 spec.
+ *
+ * When the granting party is a Class C representative (employer-side
+ * authority acting on behalf of the operating organization), the optional
+ * authorizationVCReference field is required — it carries a reference to
+ * the grantor's worker-issued authorization VC, making the chain of
+ * authority resolvable from the record itself (Class C chain-of-authority
+ * condition, PC#7 v0.5 §3).
+ *
+ * Prototype note: field presence satisfies the conformance requirement.
+ * Scope subsumption (verifying the VC's scope covers the granted capability)
+ * is not validated in this prototype per Principle 4 (progressive
+ * formalization).
+ */
+export type AgentCapabilityGrant = {
+  /** DID of the party granting the capability (worker or Class C rep). */
+  grantingPartyDID:       string
+  /** DID of the agent being granted the capability. In this prototype:
+   *  derived from the contact's keyhiveCapabilityRef at grant time, or
+   *  stubbed as `did:key:agent-${contactId}` when no ref is present. */
+  grantedAgentDID:        string
+  /** The capability tier granted (maps to AccessTier). */
+  capabilityName:         string
+  /** ISO timestamp when the grant was issued. */
+  grantTimestamp:         string
+  /** Scope of the grant (e.g. document set, project ID). Prototype: the
+   *  root document URL or 'worker-knowledge-graph'. */
+  scope:                  string
+  /** Signature of the scoping party (worker or Class C rep). Prototype:
+   *  a deterministic stub derived from grantingPartyDID + grantTimestamp;
+   *  not cryptographically valid but structurally present. */
+  scopingPartySignature:  string
+  /** Class C chain-of-authority condition: when the granting party is a
+   *  Class C representative, this field carries the reference to the
+   *  grantor's worker-issued authorization VC. Required for Class C grants;
+   *  absent for direct worker grants. */
+  authorizationVCReference?: string
+}
 
 type ContactCore = {
   contactId:             string
@@ -90,8 +134,16 @@ export type HumanContact = ContactCore & {
 
 export type AgentContact = ContactCore & {
   contactClass: 'agent'
+  /** seam:identityClass: Agent — controlled-vocabulary value per PC#7 v0.5.
+   *  Populated at agent-contact creation; present on all v0.5 agent contacts. */
+  identityClass: 'Agent'
+  /** Reference to the capability grant authorizing this agent. Populated at
+   *  contact creation with minimum fields; updated at capability-grant time
+   *  with the granting-party DID and derived agent DID. */
+  agentCapabilityGrant?: AgentCapabilityGrant
   /** Structurally grantee-only: no attestation, no account submission,
-   *  no separation-cause input, no A1–A6. Typed unavailable. */
+   *  no separation-cause input, no A1–A6. Typed unavailable per Principle 6
+   *  ("Agents are governed parties, never authors of record"). */
   recordSpeechAuthority?: never
 }
 
@@ -275,6 +327,10 @@ export type AccessEvent = {
    *  grant ever issued to an automated system" is a filter, not an
    *  investigation. Absent on pre-3.1 entries (all of which are human). */
   contactClass?:     ContactClass
+  /** Item 3.1 (v0.5): agent access-log entries carry identityClass so the
+   *  agent's governed-party status is legible in the log without opening
+   *  the contact record. Present on agent-class events; absent on human. */
+  identityClass?:    'Agent'
   /** Item 1.3 (v0.5): gate-check entries carry the full seam:gateCheckRecord
    *  structure. Replaces the prior sparse gateResult field — the structured
    *  record makes the log queryable by agentDID and grantReference per the
