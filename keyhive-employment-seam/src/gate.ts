@@ -179,6 +179,21 @@ export type CapabilityGate = {
     capability: AccessTier,
     grantReference: string,
   ) => Promise<GateResult>
+
+  /**
+   * Identical check, additionally returning the emitted seam:gateCheckRecord.
+   * Added for chained-crossing composition (Form C Item 1, CR-5): a relay
+   * seam's record must carry `chainReference` to the upstream record's
+   * `recordId`, so composed-crossing orchestration needs the record in hand,
+   * not only the result. Non-breaking: assertCapabilityCurrent delegates
+   * here and keeps its original signature. One invocation = one record =
+   * one access-log entry, whichever entry point is used.
+   */
+  assertCapabilityCurrentWithRecord: (
+    contactId: string,
+    capability: AccessTier,
+    grantReference: string,
+  ) => Promise<{ result: GateResult; record: GateCheckRecord }>
 }
 
 /**
@@ -194,11 +209,11 @@ export function createCapabilityGate(
    *  OWNING_SEAM_DID_STUB amendment flag above. */
   owningSeamDID: string = OWNING_SEAM_DID_STUB,
 ): CapabilityGate {
-  const assertCapabilityCurrent = async (
+  const assertCapabilityCurrentWithRecord = async (
     contactId: string,
     capability: AccessTier,
     grantReference: string,
-  ): Promise<GateResult> => {
+  ): Promise<{ result: GateResult; record: GateCheckRecord }> => {
     // Fresh read per invocation — execution-state check, not token check.
     const doc = read()
     const contact = doc?.contacts[contactId]
@@ -310,10 +325,25 @@ export function createCapabilityGate(
       })
     })
 
+    return { result, record: gateCheckRecord }
+  }
+
+  /** Original entry point — unchanged signature, delegates to the
+   *  record-returning variant. */
+  const assertCapabilityCurrent = async (
+    contactId: string,
+    capability: AccessTier,
+    grantReference: string,
+  ): Promise<GateResult> => {
+    const { result } = await assertCapabilityCurrentWithRecord(
+      contactId,
+      capability,
+      grantReference,
+    )
     return result
   }
 
-  return { assertCapabilityCurrent }
+  return { assertCapabilityCurrent, assertCapabilityCurrentWithRecord }
 }
 
 // ---------------------------------------------------------------------------
