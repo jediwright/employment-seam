@@ -1,5 +1,8 @@
 // src/types.ts — full schema, declare all types here
 
+import type { CrossingRecordBase, AiProvenanceRecord } from './crossingRecord'
+export type { AiProvenanceRecord }
+
 export type WorkerKnowledgeGraph = {
   identity:  WorkerIdentity
   projects:  Record<string, Project>
@@ -212,6 +215,14 @@ export type Artifact = {
   content:     string
   createdAt:   string
   tags:        string[]
+  /** seam:aiProvenance (Item 2 §3.3, PC#7 v0.5): descriptive Evidence-layer
+   *  record of AI assistance on this artifact's content. Populated by the
+   *  operating party (emittedBy) at the time an AI-assisted action is
+   *  performed. Absent on artifacts with no AI involvement — absence is a
+   *  claim of non-involvement only to the extent the operating party's
+   *  process makes it one; the schema does not certify it. The gate never
+   *  reads this field (gate/evidence adjacency, PC#7 v0.5 Principle 6). */
+  aiProvenance?: AiProvenanceRecord
 }
 
 export type ArtifactType = 'document' | 'diagram' | 'code' | 'meeting-notes' | 'other'
@@ -234,10 +245,43 @@ export type GateResult = 'pass' | 'blocked-revoked' | 'blocked-unconfirmed'
 export type RevocationConfirmationState = 'none' | 'issued' | 'confirmed'
 
 /**
- * seam:gateCheckRecord — first-class evidence artifact per PC#7 v0.5.
+ * seam:gateCheckRecord — first-class evidence artifact per PC#7 v0.5,
+ * now composed as a seam:CrossingRecord instance extension (Item 2 §3.1;
+ * UFO Lexicon v1.3 cross-reference note: the PC#7 v0.5 field set remains
+ * authoritative for the employment-seam instance extension; the base
+ * fields are inherited from CrossingRecordBase, never repeated).
+ *
+ * BASE-SHAPE CONFORMANCE (checked 2026-08-09 against Item 2 §2):
+ *   Identity group        — recordId/recordType/emittedAt/emittedBy inherited.
+ *                           `invocationTimestamp` and `emittedAt` are the
+ *                           SAME field (v0.5 term vs base term); both are
+ *                           emitted during the transition period per Item 2
+ *                           §3.1 backward-compat rule.
+ *   Provenance linkage    — provenanceStatus inherited; the gate emits
+ *                           'asserted' (see gate.ts).
+ *   Lineage anchoring     — conditionally absent: principal-seam records
+ *                           (this prototype) do not claim chain
+ *                           participation. Required for relay records.
+ *   Evidence scope        — governanceEvent/boundType narrowed to the §3.1
+ *                           literals below.
+ *
+ * ⚑ AMENDMENTS REQUIRED (surfaced, not silently added — session scope rule):
+ *   1. `emittedBy` value source: Item 2 §2.1 defines it for gate-check
+ *      records as "the gate's owning seam" (a DID). PC#7 v0.5 defines no
+ *      seam DID for the employment seam — the worker identity carries a
+ *      publicKeyFingerprint, not a DID. The prototype uses a documented
+ *      stub (gate.ts: OWNING_SEAM_DID_STUB, overridable at gate
+ *      construction). Resolving the owning-seam DID model is a PC#7 v0.6
+ *      amendment candidate; the prototype stub is evidence of the gap,
+ *      not its resolution.
+ *   2. ExposureRecord already carries `boundType: 'exposure-upper-bound'`
+ *      but is NOT one of the four crossing-record instance types.
+ *      Promoting seam:exposureRecord to a fifth instance type is a
+ *      governed-amendment candidate (recordType is "extensible by governed
+ *      amendment", Item 2 §2.1). Not adopted here.
  *
  * Every assertCapabilityCurrent() invocation — pass or block — produces
- * one of these. Required fields per the v0.5 spec:
+ * one of these. Required instance fields per the v0.5 spec:
  *   agentDID            — the agent-class participant's DID
  *   grantReference      — granting-party DID or grant identifier (required;
  *                         makes the responsible legal party resolvable from
@@ -257,7 +301,14 @@ export type RevocationConfirmationState = 'none' | 'issued' | 'confirmed'
  * evidentiary shape as seam:aiProvenance, without either depending on the
  * other.
  */
-export type GateCheckRecord = {
+export type GateCheckRecord = CrossingRecordBase & {
+  /** Structural discriminant — gate-check instance (Item 2 §3.1). */
+  recordType:             'gate-check'
+  /** Governance-semantics discriminant (Item 2 §3.1). */
+  governanceEvent:        'gate-check'
+  /** The gate records what it checked; it does not certify that no copy
+   *  has escaped (Item 2 §3.1 — same epistemic posture as ExposureRecord). */
+  boundType:              'exposure-upper-bound'
   /** The agent-class participant's DID. In this prototype: the contact's
    *  keyhiveCapabilityRef base value (the non-prefix portion of the ref);
    *  falls back to the contactId when no ref exists on record. */
