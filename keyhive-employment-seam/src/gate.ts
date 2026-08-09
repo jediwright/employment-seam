@@ -40,6 +40,20 @@ import type {
   GateCheckRecord,
   RevocationConfirmationState,
 } from './types'
+import { mintRecordId } from './crossingRecord'
+
+/**
+ * ⚑ AMENDMENT REQUIRED (PC#7 v0.6 candidate — surfaced 2026-08-09):
+ * The base shape (Item 2 §2.1) defines `emittedBy` for gate-check records
+ * as "the gate's owning seam" — a DID. PC#7 v0.5 defines no seam DID: the
+ * worker identity carries a publicKeyFingerprint; the seam itself has no
+ * addressable identity. Until an owning-seam DID model is ruled, the gate
+ * emits this documented stub (overridable via createCapabilityGate's third
+ * parameter). The stub follows the prototype's existing did:key stub
+ * convention (cf. grantedAgentDID). It is structurally present and
+ * honestly fake — evidence of the gap, not its resolution.
+ */
+export const OWNING_SEAM_DID_STUB = 'did:key:seam-principal-prototype'
 
 /** The slice of the document the gate reads. */
 export type GateDoc = Pick<WorkerKnowledgeGraph, 'contacts' | 'accessLog'>
@@ -175,6 +189,10 @@ export type CapabilityGate = {
 export function createCapabilityGate(
   read: () => GateDoc | undefined,
   change: (mutate: (d: WorkerKnowledgeGraph) => void) => void,
+  /** The gate's owning seam, as a DID — becomes `emittedBy` on every
+   *  gate-check record. Defaults to the documented stub; see the
+   *  OWNING_SEAM_DID_STUB amendment flag above. */
+  owningSeamDID: string = OWNING_SEAM_DID_STUB,
 ): CapabilityGate {
   const assertCapabilityCurrent = async (
     contactId: string,
@@ -223,7 +241,50 @@ export function createCapabilityGate(
       ? contact.keyhiveCapabilityRef.replace(/^revoked-(local|confirmed):/, '')
       : contactId
 
+    // seam:CrossingRecord base-shape emission (Item 2 §2, applied 2026-08-09).
+    //
+    // provenanceStatus BEHAVIOR (SL-0034 under test this session):
+    // The gate emits 'asserted' on EVERY result — pass, blocked-revoked,
+    // and blocked-unconfirmed alike. The two fields answer different
+    // questions and must not conflate: `gateResult` is the gate's OUTCOME
+    // ("what did the check return"); `provenanceStatus` is the RECORD's
+    // epistemic status ("how do this record's claims stand"). A
+    // blocked-unconfirmed result expresses uncertainty about revocation
+    // PROPAGATION; the record's claim — "the gate returned
+    // blocked-unconfirmed at T against this replica's state" — is directly
+    // observed by the emitter and is therefore correctly 'asserted'
+    // (Q6 trust-the-author: author-declared claims at emission).
+    // No basis field is emitted (basis belongs to non-asserted statuses).
+    // Status upgrades are SUPERSESSION events — a new record referencing
+    // this one via supersededBy — never mutations of this record
+    // (supersession-not-reinterpretation, Item 2 §2.2). Nothing in this
+    // file, including confirmRevocation, rewrites an emitted record.
+    //
+    // Producer inventory (honest upper bound): this prototype emits ONLY
+    // 'asserted'. The 'confirmed' / 'contested' / 'superseded' statuses
+    // are schema-present, producer-absent — parallel to the locked
+    // lineageAnchorType values. The vocabulary names them; no machinery
+    // here produces them.
+    //
+    // `emittedAt` and `invocationTimestamp` are the same instant by
+    // construction — dual emission per the Item 2 §3.1 transition rule
+    // (`invocationTimestamp` is the v0.5 term, superseded by the base
+    // term; both emitted for backward compatibility).
     const gateCheckRecord: GateCheckRecord = {
+      // Base shape — identity group
+      recordId:            mintRecordId(),
+      recordType:          'gate-check',
+      emittedAt:           now,
+      emittedBy:           owningSeamDID,
+      // Base shape — provenance linkage group
+      provenanceStatus:    'asserted',
+      // Base shape — lineage anchoring group: absent. Principal-seam
+      // record; no chain participation claimed (Item 2 §2.3 — the group
+      // is required for relay records only).
+      // Base shape — evidence scope group
+      governanceEvent:     'gate-check',
+      boundType:           'exposure-upper-bound',
+      // Instance extension — PC#7 v0.5 field set (authoritative)
       agentDID,
       grantReference,
       capabilityName:      capability,
