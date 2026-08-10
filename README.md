@@ -29,10 +29,13 @@ It is the first Pattern Commons entry where all four layers of the [Seam Stack](
 - An `assertCapabilityCurrent()` gate enforces that any automated actor must verify capability state per invocation — never from a cached token or TTL — before acting on a worker's behalf; every invocation produces a `seam:gateCheckRecord` evidence artifact with the agent DID, grant reference, capability name, timestamp, and gate result
 - Agent-class contacts (`seam:identityClass: Agent`) are structurally grantee-only: the type system makes attestation and account-submission authority unavailable to them, not merely unrendered in the UI (Principle 6: agents are governed parties, never authors of record)
 - Revocation follows a two-state model — `revoked-local` (seam fired, signal propagating) and `revoked-confirmed` (acknowledgment received) — so the gate can distinguish an unconfirmed revocation signal from a confirmed one and record the distinction in the access log
+- A relay seam (Type 2) demonstrates that composition rules CR-1 through CR-5 hold across chained crossings: a relay party can hold an inner seam with a worker while the outer seam with the hiring organization remains governed independently, with no shared finality authority
+- The `seam:CrossingRecord` base shape provides a unified, chain-aware schema that all governed-event record types instantiate: gate-check records, lineage records, AI-provenance records, and code-change verification records compose uniformly against a single auditable structure
+- A P13 evidence plane implements multi-party governance record types — `SeamTermAmendmentRecord`, `ObjectionRecord`, `ConsentRecord`, `ResolutionRecord` — all finality-arbiter-free: consent is derived from the record set, not from a coordinator; amendment status is a pure derivation, never stored in any record
 
-The prototype implements build plan v0.5 items 1.3, 3.1, and 3.2 (33/33 tests passing). Items 1.1 and 1.2 — degraded-sync behavior and two-state revocation — are implemented in simulation (`degradedSync.test.ts`, 5/5 passing, commit `0c044bf`); the live-relay observation leg (DevTools throttling against the Subduction relay) is deferred as optional and not required for the essay's claim.
+**Implementation status:** 131/131 tests passing (93 base + 38 P13). Items 1.1 and 1.2 — degraded-sync behavior and two-state revocation — are implemented in simulation (`degradedSync.test.ts`, 5/5 passing, commit `0c044bf`); the live-relay observation leg (DevTools throttling against the Subduction relay) is deferred as optional and not required for the essay's claim.
 
-See [`keyhive-employment-seam/README.md`](keyhive-employment-seam/README.md) for run instructions.
+See [`keyhive-employment-seam/README.md`](https://github.com/jediwright/employment-seam/blob/main/keyhive-employment-seam/README.md) for run instructions.
 
 ## The Larger Argument
 
