@@ -36,6 +36,10 @@ All five `@automerge/*` packages must stay in lockstep at `2.6.0-subduction.40`.
 
 subduct.io is the official Ink & Switch hosted Subduction relay, labeled "early preview, not production-ready." The prototype's BroadcastChannel transport does not expose per-peer acknowledgment — exposure records carry `boundType: 'exposure-upper-bound'` to reflect this honestly. See the access log in the running app for gate-check and revocation evidence.
 
+## Known Limits
+
+**Client runtime cost on constrained devices.** The prototype combines CRDT merge, Keyhive capability crypto, and local record-set derivation (including `meetOfCandidates` and `deriveAmendmentStatus`). Behavior on low-end mobile hardware at realistic record-set scale is untested. The architecture makes no claims about runtime performance on constrained devices.
+
 ## Spec Reference
 
 The governing specification is Pattern Commons #7 v0.5, maintained in the [local-first-series](https://github.com/jediwright/local-first-series) repo. The prototype co-registers against it; it does not author it.
