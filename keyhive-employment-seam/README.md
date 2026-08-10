@@ -1,19 +1,19 @@
 # keyhive-employment-seam
 
-Reference implementation for Pattern Commons #7 — the employment seam. See the [root README](../README.md) for the full architectural description and essay context.
+Reference implementation for Pattern Commons #7 — the employment seam. See the [root README](https://github.com/jediwright/employment-seam/blob/main/README.md) for the full architectural description and essay context.
 
 ## What This Is
 
-A working Vite/React/TypeScript prototype demonstrating cryptographically-governed knowledge handoff at an employment boundary. Uses [Automerge](https://automerge.org/) with [Keyhive](https://github.com/inkandswitch/keyhive) for access control. The relay is structurally prevented from reading bundle contents.
+A working Vite/React/TypeScript prototype demonstrating cryptographically-governed knowledge handoff at an employment boundary. Uses Automerge with Keyhive for access control. The relay is structurally prevented from reading bundle contents.
 
-Implements build plan v0.5: `assertCapabilityCurrent()` gate with `seam:gateCheckRecord` evidence, agent-class contacts (`seam:identityClass: Agent`) as structurally grantee-only, and two-state revocation (`revoked-local` / `revoked-confirmed`). 33/33 tests passing.
+Implements build plan v0.5: `assertCapabilityCurrent()` gate with `seam:gateCheckRecord` evidence, agent-class contacts (`seam:identityClass: Agent`) as structurally grantee-only, and two-state revocation (`revoked-local` / `revoked-confirmed`). Relay seam (Type 2) demonstrates composition rules CR-1 through CR-5 hold across chained crossings with no shared finality authority. `seam:CrossingRecord` base shape provides a unified, chain-aware schema instantiated by all governed-event record types. P13 evidence plane implements `SeamTermAmendmentRecord`, `ObjectionRecord`, `ConsentRecord`, and `ResolutionRecord` — finality-arbiter-free; amendment status derived from the record set, never stored. **131/131 tests passing** (93 base + 38 P13).
 
 ## Run Instructions
 
 ```bash
 npm install
 npm run dev      # development server at http://localhost:5173
-npm test         # vitest run — 33/33 expected
+npm test         # vitest run — 131/131 expected
 npm run build    # production build check
 ```
 
@@ -34,7 +34,7 @@ All five `@automerge/*` packages must stay in lockstep at `2.6.0-subduction.40`.
 
 ## Relay Status
 
-[subduct.io](https://subduct.io) is the official Ink & Switch hosted Subduction relay, labeled "early preview, not production-ready." The prototype's BroadcastChannel transport does not expose per-peer acknowledgment — exposure records carry `boundType: 'exposure-upper-bound'` to reflect this honestly. See the access log in the running app for gate-check and revocation evidence.
+subduct.io is the official Ink & Switch hosted Subduction relay, labeled "early preview, not production-ready." The prototype's BroadcastChannel transport does not expose per-peer acknowledgment — exposure records carry `boundType: 'exposure-upper-bound'` to reflect this honestly. See the access log in the running app for gate-check and revocation evidence.
 
 ## Spec Reference
 
