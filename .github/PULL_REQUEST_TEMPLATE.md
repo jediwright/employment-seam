@@ -1,6 +1,6 @@
 <!--
 PR Template · keyhive-employment-seam
-Governed derivative of the Governed PR Framework v0.3 (J. Wright)
+Governed derivative of the Governed PR Framework v0.4 (J. Wright)
 Full framework: github.com/jediwright/governed-pr-framework
 
 HOW THIS WORKS
@@ -132,7 +132,7 @@ after-the-fact tags. See §10.1 of the framework for the full procedure.
 
 - **Tier declaration matches the diff:** <!-- yes | disputed → resolves upward -->
 - **Reviewed outside the authoring context via:** <!-- maintainer review | separate session vs. spec (solo) -->
-- **Automated checks (lint, tsc, npm test — all 33+ tests green):** <!-- green | bypass declared above with reason -->
+- **Automated checks (lint, tsc, npm test — all 131 tests green):** <!-- green | bypass declared above with reason -->
 - **No Unverified tags on protected surfaces:** <!-- confirmed | n/a -->
 
 **Reviewer scope** <!-- required on Feature+ at this scale -->

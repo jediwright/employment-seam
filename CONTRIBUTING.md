@@ -1,6 +1,6 @@
 # Contributing to keyhive-employment-seam
 
-This repository follows the [Governed PR Framework v0.3](https://github.com/jediwright/governed-pr-framework) (J. Wright).
+This repository follows the [Governed PR Framework v0.4](https://github.com/jediwright/governed-pr-framework) (J. Wright).
 This file is a governed derivative of that framework. Inheritance rules: §8 of `FRAMEWORK.md`.
 
 ---
@@ -11,7 +11,7 @@ This file is a governed derivative of that framework. Inheritance rules: §8 of 
 
 Governing specification: `pattern-commons-07-employment-seam-v0-5_2026-08-08.md`  
 Build plan: `keyhive-employment-seam-build-plan-v0-5_2026-08-08.md`  
-Vocabulary: `UFO_Lexicon_v1_2_2026-08-08.md`
+Vocabulary: `UFO_Lexicon_v1_5_2026-08-09.md`
 
 ---
 
@@ -102,7 +102,7 @@ When a class is declared, it will appear here with: the class name, its exact bo
 The following are enforced by tooling, not by reviewer memory:
 
 - **Lint and type checks** — `npm run lint` / TypeScript compiler; must pass before merge.
-- **Test suite** — `npm test` (Vitest); all 42 tests must be green. The suite covers gate behavior (`gate.test.ts`), degraded-sync behavior (`degradedSync.test.ts`), and the Phase 2 exposure record (`phase2ExposureRecord.test.ts`). A PR that breaks any of these is blocked regardless of tier.
+- **Test suite** — `npm test` (Vitest); all 131 tests must be green. The suite covers gate behavior (`gate.test.ts`), degraded-sync behavior (`degradedSync.test.ts`), the Phase 2 exposure record (`phase2ExposureRecord.test.ts`), crossing-record base shape (`crossingRecord.test.ts`), and P13 evidence-plane record types (`p13EvidencePlane.test.ts`). A PR that breaks any of these is blocked regardless of tier.
 - **Structured commit format** — `fix:` / `feat:` / `refactor:` / `chore:` + scope. Enforced by commit hook (to be added; manual discipline until then). Makes history parseable and intention-legible.
 - **Diff-size advisory** — PRs exceeding 400 changed lines receive a comment requiring either a split or a written justification. Line count is not the tier definition; it is the signal that something may be mis-tiered.
 
@@ -134,12 +134,12 @@ See §10.1 of the framework for the full procedure.
 
 ## Attribution
 
-This file is a governed derivative of the **Governed PR Framework v0.3** (J. Wright · UX Minds, LLC).  
+This file is a governed derivative of the **Governed PR Framework v0.4** (J. Wright · UX Minds, LLC).  
 Framework repo: `github.com/jediwright/governed-pr-framework`
 
 Derivative-local content (protected surfaces, dependency pins, repository-specific gates) does not flow upstream. Improvements worth proposing upstream go through the parent's change-control process.
 
 ---
 
-*`CONTRIBUTING.md` — keyhive-employment-seam — Governed PR Framework v0.3 derivative*  
+*`CONTRIBUTING.md` — keyhive-employment-seam — Governed PR Framework v0.4 derivative*  
 *Adopted August 8, 2026. Register: CONTEXTUAL. Delivery-not-application: apply locally, commit.*
