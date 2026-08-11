@@ -43,6 +43,8 @@ It is the first Pattern Commons entry where all four layers of the [Seam Stack](
 
 See `keyhive-employment-seam/README.md` for run instructions.
 
+Build tracker: [employment-seam build tracker](https://github.com/users/jediwright/projects/1)
+
 ---
 
 ## The Larger Argument
