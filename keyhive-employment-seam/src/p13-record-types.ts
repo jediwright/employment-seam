@@ -23,7 +23,18 @@
  *
  * NI-5: Local-first specific on current evidence.
  * Form C cluster PROPOSED per UFO Lexicon v1.4.
+ *
+ * D2-C6 EXTENSION (P13 D2 build session, 2026-08-10): deriveAmendmentStatus
+ * accepts an optional delegationRecords parameter (spec §5.6). The
+ * DelegationRecord type and hasDelegatedConsent() live in
+ * p13-d2c6-delegation-record.ts; that module imports only TYPES from this
+ * one, so the runtime import graph stays acyclic.
  */
+
+import {
+  hasDelegatedConsent,
+  type DelegationRecord,
+} from './p13-d2c6-delegation-record';
 
 // ---------------------------------------------------------------------------
 // Base types (re-exported from Item 2 base shape — not repeated, inherited)
@@ -383,12 +394,25 @@ export type GrantChain = DID[];
  * also ≥1 objection). The derivation returns 'operative' in this case — the
  * objection is recorded evidence, not a veto. This is the design intent from
  * the scoping note §3.2 and the D1 T7 confirmation.
+ *
+ * D2-C6 SIGNATURE EXTENSION (P13 D2 build session, 2026-08-10; spec §5.6):
+ * The optional `delegationRecords` parameter (position 5 — additive;
+ * existing call sites unchanged) composes DelegationRecord (D2-C6) with the
+ * consent derivation. Before marking a grant-chain party's consent slot as
+ * unfilled, the derivation calls hasDelegatedConsent(): a consent authored
+ * by a party's active delegatee for this amendmentRef is treated as
+ * equivalent to a consent authored by the party (the delegatee acts with
+ * the grantor's authority on the consent surface). Default [] — the
+ * derivation without delegations is byte-identical to the OI-P13-1
+ * behavior. No 'contested' derivation for delegation (D3 constraint 5):
+ * an absent or superseded delegation simply contributes no effect.
  */
 export function deriveAmendmentStatus(
   amendmentId: URI,
   grantChain: GrantChain,
   recordSet: P13RecordSet,
-  lapseIntervalMs: number = DEFAULT_LAPSE_INTERVAL_MS
+  lapseIntervalMs: number = DEFAULT_LAPSE_INTERVAL_MS,
+  delegationRecords: DelegationRecord[] = []
 ): AmendmentStatus {
   const amendment = recordSet.amendments.find(a => a.amendmentId === amendmentId);
   if (!amendment) {
@@ -400,7 +424,14 @@ export function deriveAmendmentStatus(
     c => c.amendmentRef === amendmentId && c.provenanceStatus !== 'superseded'
   );
   const consentingParties = new Set(activeConsentsForAmendment.map(c => c.consentingParty));
-  const allPartiesConsented = grantChain.every(party => consentingParties.has(party));
+  const allPartiesConsented = grantChain.every(
+    party =>
+      consentingParties.has(party) ||
+      // D2-C6: a consent authored by the party's active delegatee fills the slot
+      activeConsentsForAmendment.some(c =>
+        hasDelegatedConsent(party, c.consentingParty, delegationRecords)
+      )
+  );
 
   if (allPartiesConsented && grantChain.length > 0) {
     return 'operative';
