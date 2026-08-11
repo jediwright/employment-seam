@@ -36,6 +36,12 @@ import {
   type DelegationRecord,
 } from './p13-d2c6-delegation-record';
 
+import {
+  type ThresholdDerivationContext,
+  CONSTITUTIONAL_TERM_KEYS,
+  isThresholdMet,
+} from './p13-d2c2-threshold-rules';
+
 // ---------------------------------------------------------------------------
 // Base types (re-exported from Item 2 base shape — not repeated, inherited)
 // These are the Item 2 CrossingRecord base fields all four types carry.
@@ -406,35 +412,104 @@ export type GrantChain = DID[];
  * derivation without delegations is byte-identical to the OI-P13-1
  * behavior. No 'contested' derivation for delegation (D3 constraint 5):
  * an absent or superseded delegation simply contributes no effect.
+ *
+ * D2-C2 SIGNATURE EXTENSION (P13 D2-C2 build session, 2026-08-10; spec §2.4.4):
+ * The optional `thresholdContext` parameter (position 6 — additive; all
+ * existing call sites unchanged) composes ThresholdRule (D2-C2) with the
+ * operative-clause derivation. When present, it REPLACES the operative
+ * predicate: operativity is derived by isThresholdMet() over the closed
+ * standing set, not by T7 all-grant-chain unanimity.
+ *
+ * Constitutional carve-out (spec §2.4.7): amendments whose termKey is in
+ * CONSTITUTIONAL_TERM_KEYS ('standing-registry', 'threshold-rule') ALWAYS
+ * derive under T7 unanimity even when thresholdContext is supplied — the
+ * closed set that legitimates counting must not itself be modifiable by
+ * counting. The threshold path is skipped for these termKeys.
+ *
+ * All other branches (lapsed, contested, proposed) and the Lexicon-registered
+ * AmendmentStatus precedence order are untouched.
+ *
+ * Default undefined → existing T7 derivation runs unchanged → 161-test base
+ * intact by construction.
+ *
+ * DISSENT-VISIBLE OPERATIVITY (Known Limit 2): under any non-unanimous rule,
+ * an amendment can derive 'operative' while an active ObjectionRecord exists.
+ * Precedence checks 'operative' first (Lexicon-registered order). The
+ * objection is carried as evidence for institutional-layer proceedings; it is
+ * not erased and does not block. Parties consenting to a threshold rule at
+ * formation consent to exactly this property.
  */
 export function deriveAmendmentStatus(
   amendmentId: URI,
   grantChain: GrantChain,
   recordSet: P13RecordSet,
   lapseIntervalMs: number = DEFAULT_LAPSE_INTERVAL_MS,
-  delegationRecords: DelegationRecord[] = []
+  delegationRecords: DelegationRecord[] = [],
+  thresholdContext?: ThresholdDerivationContext
 ): AmendmentStatus {
   const amendment = recordSet.amendments.find(a => a.amendmentId === amendmentId);
   if (!amendment) {
     throw new Error(`Amendment ${amendmentId} not found in record set`);
   }
 
-  // Check operative: all grant-chain parties have active (unrevoked) consent
-  const activeConsentsForAmendment = recordSet.consents.filter(
-    c => c.amendmentRef === amendmentId && c.provenanceStatus !== 'superseded'
-  );
-  const consentingParties = new Set(activeConsentsForAmendment.map(c => c.consentingParty));
-  const allPartiesConsented = grantChain.every(
-    party =>
-      consentingParties.has(party) ||
-      // D2-C6: a consent authored by the party's active delegatee fills the slot
-      activeConsentsForAmendment.some(c =>
-        hasDelegatedConsent(party, c.consentingParty, delegationRecords)
+  // D2-C2: Threshold operative branch — replaces the T7 all-grant-chain check
+  // when a ThresholdDerivationContext is supplied AND the amendment's termKey
+  // is not in CONSTITUTIONAL_TERM_KEYS.
+  //
+  // Constitutional carve-out (spec §2.4.7): 'standing-registry' and
+  // 'threshold-rule' termKeys always derive under T7 unanimity — skipped here
+  // and handled by the T7 block below.
+  if (
+    thresholdContext !== undefined &&
+    !CONSTITUTIONAL_TERM_KEYS.includes(
+      amendment.termKey as (typeof CONSTITUTIONAL_TERM_KEYS)[number]
+    )
+  ) {
+    // D2-C2 threshold operative branch (spec §2.4.2, §2.4.4).
+    //
+    // isThresholdMet() is the canonical predicate, imported directly from
+    // p13-d2c2-threshold-rules.ts. The runtime import graph remains acyclic:
+    // that module imports only TYPES from this file (erased at compile), so
+    // the runtime edges are record-types → threshold-rules → d2c6-delegation
+    // with no cycle. (Confirmed empirically in the 2026-08-10 pre-push
+    // review: direct import + call, 188/188 passing, tsc clean.)
+    if (
+      isThresholdMet(
+        amendmentId,
+        recordSet,
+        thresholdContext.standingRegistry,
+        thresholdContext.rule,
+        delegationRecords
       )
-  );
+    ) {
+      return 'operative';
+    }
+    // Threshold not met (or empty counted set): fall through to
+    // lapsed/contested/proposed. T7 unanimity below is intentionally
+    // skipped — the threshold rule IS the operative predicate
+    // (replacement, not layering; spec §2.4.4).
+  } else {
+    // T7 unanimity: all grant-chain parties have active (unrevoked) consent.
+    // This branch runs when:
+    //   (a) no thresholdContext supplied (default T7 behavior), OR
+    //   (b) thresholdContext supplied but amendment.termKey is constitutional
+    //       (carve-out: constitutional amendments always derive under T7).
+    const activeConsentsForAmendment = recordSet.consents.filter(
+      c => c.amendmentRef === amendmentId && c.provenanceStatus !== 'superseded'
+    );
+    const consentingParties = new Set(activeConsentsForAmendment.map(c => c.consentingParty));
+    const allPartiesConsented = grantChain.every(
+      party =>
+        consentingParties.has(party) ||
+        // D2-C6: a consent authored by the party's active delegatee fills the slot
+        activeConsentsForAmendment.some(c =>
+          hasDelegatedConsent(party, c.consentingParty, delegationRecords)
+        )
+    );
 
-  if (allPartiesConsented && grantChain.length > 0) {
-    return 'operative';
+    if (allPartiesConsented && grantChain.length > 0) {
+      return 'operative';
+    }
   }
 
   // Check lapsed: no consent AND no objection within the lapse interval
