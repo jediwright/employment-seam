@@ -53,6 +53,12 @@ This prototype is the architectural demonstration for *[Full Personhood: The Gov
 
 The employment seam is where all four Seam Stack layers become necessary at once.
 
+The employment seam is also the first governed seam of a wider scope:
+person-side infrastructure for the records a whole life produces, with
+cross-domain composition — not additional verticals — as the near-term
+direction. Roadmap at
+[seam-stack](https://github.com/jediwright/seam-stack).
+
 ---
 
 ## What This Pattern Does Not Solve
