@@ -49,7 +49,7 @@ Build tracker: [employment-seam build tracker](https://github.com/users/jediwrig
 
 ## The Larger Argument
 
-This prototype is the architectural demonstration for *[Full Personhood: The Governance Model AI Requires and Capitalism Never Built](https://www.systemsofthought.com/full-personhood/)* — a governance essay and manifesto developed on Systems of Thought. The essay argues that the 140-year structural asymmetry between corporate personhood and worker personhood requires an architectural response, not just a legal one, and that the Seam Stack provides that model: substrate the participant owns, governance they control, boundary events with legal weight, and an evidence layer built for contested exits.
+This prototype is the architectural demonstration for *[Full Personhood: The Governance Model AI Requires and Capitalism Never Built](https://www.systemsofthought.com/full-personhood/)* — a governance essay developed on Systems of Thought. The essay argues that the 140-year structural asymmetry between corporate personhood and worker personhood requires an architectural response, not just a legal one, and that the Seam Stack provides that model: substrate the participant owns, governance they control, boundary events with legal weight, and an evidence layer built for contested exits.
 
 The employment seam is where all four Seam Stack layers become necessary at once.
 
