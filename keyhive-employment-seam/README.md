@@ -24,13 +24,13 @@ This prototype runs on a frozen prerelease stack. Do not upgrade these without a
 | Package | Pinned version | Notes |
 |---|---|---|
 | `@automerge/automerge-repo` | `2.6.0-subduction.40` | Forked prerelease; hard-pinned |
-| `@automerge/automerge-repo-keyhive` | `0.4.0-alpha.sub.4` | Keyhive adapter; frozen since Oct 2025 |
+| `@automerge/automerge-repo-keyhive` | `0.5.0-alpha.1` | Keyhive adapter; upgraded 2026-08-16 |
 | `@automerge/automerge-repo-network-broadcastchannel` | `2.6.0-subduction.40` | Must cascade with repo pin |
 | `@automerge/automerge-repo-react-hooks` | `2.6.0-subduction.40` | Must cascade with repo pin |
 | `@automerge/automerge-repo-storage-indexeddb` | `2.6.0-subduction.40` | Must cascade with repo pin |
 | `vite-plugin-wasm` | `^3.6.0` | Required for Automerge WASM |
 
-All five `@automerge/*` packages must stay in lockstep at `2.6.0-subduction.40`. The Keyhive adapter (`0.4.0-alpha.sub.4`) is the only actively maintained artifact wrapping this stack.
+All five `@automerge/*` packages must stay in lockstep at `2.6.0-subduction.40`. The Keyhive adapter (`0.5.0-alpha.1`) is the only actively maintained artifact wrapping this stack.
 
 ## Relay Status
 
