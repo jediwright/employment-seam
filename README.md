@@ -39,7 +39,7 @@ It is the first Pattern Commons entry where all four layers of the [Seam Stack](
 - The `seam:CrossingRecord` base shape provides a unified, chain-aware schema that all governed-event record types instantiate: gate-check records, lineage records, AI-provenance records, and code-change verification records compose uniformly against a single auditable structure
 - A P13 evidence plane implements multi-party governance record types — `SeamTermAmendmentRecord`, `ObjectionRecord`, `ConsentRecord`, `ResolutionRecord` — all finality-arbiter-free: consent is derived from the record set, not from a coordinator; amendment status is a pure derivation, never stored in any record
 
-**Implementation status:** 188/188 tests passing (161 pre-D2-C2 base + 27 P13 D2-C2 threshold/quorum). Items 1.1 and 1.2 — degraded-sync behavior and two-state revocation — are implemented in simulation (`degradedSync.test.ts`, 5/5 passing, commit `0c044bf`); the live-relay observation leg (DevTools throttling against the Subduction relay) is deferred as optional and not required for the essay's claim.
+**Implementation status:** 191/191 tests passing (164 base + 27 P13 D2-C2 threshold/quorum). Items 1.1 and 1.2 — degraded-sync behavior and two-state revocation — are implemented in simulation (`degradedSync.test.ts`, 8/8 passing); the live-relay observation leg (DevTools throttling against the Subduction relay) ran 2026-08-16 across all three profiles (3G, Offline, Intermittent); findings in `phase1-degraded-sync-observations.md`.
 
 See `keyhive-employment-seam/README.md` for run instructions.
 
