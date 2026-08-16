@@ -23,24 +23,22 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import {
-  // Types
+import type {
   SeamTermAmendmentRecord,
   ObjectionRecord,
   ConsentRecord,
   ResolutionRecord,
   P13RecordSet,
   ResolutionCapabilityRegistry,
-  // Derivation functions
+  DID,
+  URI,
+} from './p13-record-types';
+import {
   deriveAmendmentStatus,
   meetOfCandidates,
   mergeRecordSets,
   hasResolutionCapability,
   DEFAULT_LAPSE_INTERVAL_MS,
-  // Controlled vocab types (for type-check tests)
-  AmendmentStatus,
-  DID,
-  URI,
 } from './p13-record-types';
 
 // ---------------------------------------------------------------------------
@@ -202,7 +200,7 @@ describe('CONTAINMENT CANARY — gate never reads contest state', () => {
     // No existing record is mutated.
     const amendment = makeAmendment();
     const originalAmendment = { ...amendment };
-    const _objection = makeObjection(); // emitting an objection
+    void makeObjection(); // emitting an objection; result intentionally unused
 
     // Original amendment is unchanged
     expect(amendment).toEqual(originalAmendment);

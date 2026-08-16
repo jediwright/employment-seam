@@ -106,6 +106,8 @@ function makeAmendment(
     lineageAnchorType: 'author-declared',
     termKey: 'wage-review-interval',
     proposedValue: '6-months',
+    proposedBy: DID_A,
+    effectiveIfOperative: true,
     ...overrides,
   };
 }
@@ -124,6 +126,7 @@ function makeConsent(
     governanceEvent: 'term-amendment-consent',
     boundType: 'exposure-upper-bound',
     lineageAnchorType: 'author-declared',
+    consentId: uid('consent-id'),
     amendmentRef: amendmentId,
     consentingParty,
     ...overrides,

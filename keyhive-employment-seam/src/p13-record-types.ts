@@ -35,6 +35,7 @@ import {
   hasDelegatedConsent,
   type DelegationRecord,
 } from './p13-d2c6-delegation-record';
+export type { DelegationRecord };
 
 import {
   type ThresholdDerivationContext,
