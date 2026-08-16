@@ -31,8 +31,10 @@ const ACCESS_TIER_LABELS: Record<AccessTier, string> = {
 function capabilityState(ref?: string): { label: string; classes: string } {
   if (!ref)
     return { label: 'No cryptographic access', classes: 'bg-amber-50 text-amber-700' }
-  if (isRevocationRef(ref))
-    return { label: 'Access revoked', classes: 'bg-red-50 text-red-600' }
+  if (ref.startsWith('revoked-local:'))
+    return { label: 'Revocation issued — propagation unconfirmed on this transport', classes: 'bg-amber-50 text-amber-700' }
+  if (ref.startsWith('revoked-confirmed:'))
+    return { label: 'Revocation confirmed', classes: 'bg-red-50 text-red-600' }
   return { label: 'Access granted', classes: 'bg-green-50 text-green-700' }
 }
 

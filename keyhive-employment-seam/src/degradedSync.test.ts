@@ -311,3 +311,26 @@ describe('two-state revocation under degraded sync (Item 1.2 re-execution)', () 
     })
   })
 })
+
+// Item 1.2 Path B — honest degraded indicator
+describe('Item 1.2 Path B — honest degraded indicator', () => {
+  it('revocationConfirmationState() returns "issued" for revoked-local ref', () => {
+    const contact = {
+      keyhiveCapabilityRef: 'revoked-local:automerge:someref',
+    } as Contact
+    expect(revocationConfirmationState(contact)).toBe('issued')
+  })
+
+  it('revocationConfirmationState() is a no-op / does not throw on missing ref', () => {
+    const contact = { keyhiveCapabilityRef: undefined } as unknown as Contact
+    expect(() => revocationConfirmationState(contact)).not.toThrow()
+    expect(revocationConfirmationState(contact)).toBe('none')
+  })
+
+  it('revoked-confirmed remains structurally present and returns "confirmed"', () => {
+    const contact = {
+      keyhiveCapabilityRef: 'revoked-confirmed:automerge:someref',
+    } as Contact
+    expect(revocationConfirmationState(contact)).toBe('confirmed')
+  })
+})
