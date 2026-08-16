@@ -6,14 +6,14 @@ Reference implementation for Pattern Commons #7 — the employment seam. See the
 
 A working Vite/React/TypeScript prototype demonstrating cryptographically-governed knowledge handoff at an employment boundary. Uses Automerge with Keyhive for access control. The relay is structurally prevented from reading bundle contents.
 
-Implements build plan v0.5: `assertCapabilityCurrent()` gate with `seam:gateCheckRecord` evidence, agent-class contacts (`seam:identityClass: Agent`) as structurally grantee-only, and two-state revocation (`revoked-local` / `revoked-confirmed`). Relay seam (Type 2) demonstrates composition rules CR-1 through CR-5 hold across chained crossings with no shared finality authority. `seam:CrossingRecord` base shape provides a unified, chain-aware schema instantiated by all governed-event record types. P13 evidence plane implements `SeamTermAmendmentRecord`, `ObjectionRecord`, `ConsentRecord`, and `ResolutionRecord` — finality-arbiter-free; amendment status derived from the record set, never stored. **131/131 tests passing** (93 base + 38 P13).
+Implements build plan v0.5: `assertCapabilityCurrent()` gate with `seam:gateCheckRecord` evidence, agent-class contacts (`seam:identityClass: Agent`) as structurally grantee-only, and two-state revocation (`revoked-local` / `revoked-confirmed`). Relay seam (Type 2) demonstrates composition rules CR-1 through CR-5 hold across chained crossings with no shared finality authority. `seam:CrossingRecord` base shape provides a unified, chain-aware schema instantiated by all governed-event record types. P13 evidence plane implements `SeamTermAmendmentRecord`, `ObjectionRecord`, `ConsentRecord`, and `ResolutionRecord` — finality-arbiter-free; amendment status derived from the record set, never stored. **191/191 tests passing** (93 base + 38 P13).
 
 ## Run Instructions
 
 ```bash
 npm install
 npm run dev      # development server at http://localhost:5173
-npm test         # vitest run — 131/131 expected
+npm test         # vitest run — 191/191 expected
 npm run build    # production build check
 ```
 
