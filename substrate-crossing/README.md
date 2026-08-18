@@ -61,3 +61,29 @@ test/                          empty; Vitest baseline (passWithNoTests)
 
 Phase 0 scope only — no crossing logic, no intent/completion records, no
 relay-timing instrumentation beyond the Item 0.2 baseline probe.
+
+## Implementation findings (Phase 1 / Item 1.1)
+
+- **F-5 — DummyNetworkAdapter packaging breakage (upstream watch item).**
+  `@automerge/automerge-repo@2.6.0-subduction.40` ships
+  `dist/helpers/DummyNetworkAdapter.js` with a broken relative import
+  (`../../src/helpers/pause.js`; the `src/` tree is not published), so the
+  packaged helper cannot be imported. Workaround: self-contained
+  `test/helpers/pair-network-adapter.ts` replicating the connected-pair
+  behavior (microtask delivery). Remove on upstream fix. Do not patch
+  node_modules.
+
+- **F-6 — 0.5.0-alpha.1 API shape.**
+  `initializeLegacyAutomergeRepoKeyhive(opts)` constructs the Repo itself
+  and returns `{ hive, repo }`; it requires `storage`, `peerIdSuffix`,
+  `networkAdapter`, `syncServer`, and `createRepo`. `accessForDoc(id, docUrl)`
+  takes the member's `Identifier` first (obtain via
+  `receiveContactCard(card).id`). The local contact card lives at
+  `hive.active.contactCard`. `create2()` is the Keyhive create path (A3).
+
+- **A6 qualification (gate predicate).** Item 1.1 gates on
+  `accessForDoc(...) !== undefined` ("authorizing grant present") —
+  consistent with the Phase 0 Item 0.3 baseline. The parent
+  keyhive-employment-seam gate uses an ordinal AccessTier comparison; that
+  richer pattern is the precedent if a later item requires tier-sensitive
+  gating (e.g., publication requiring write-or-better).
