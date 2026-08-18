@@ -48,7 +48,7 @@ async function main() {
   console.log(`[0.2] createSession() OK (${Date.now() - t0}ms) did=${did}`);
 
   // --- 2. Relay subscription (start BEFORE the write so the event is caught) ---
-  const wsUrl = `${JETSTREAM}?wantedCollections=com.whtwnd.blog.entry&wantedDids=${did}`;
+  const wsUrl = JETSTREAM; // unfiltered: Jetstream wantedCollections filter does not deliver com.whtwnd.blog.entry commits (observed 2026-08-18); client-side DID+collection filter in the message handler
   const ws = new WebSocket(wsUrl);
   let relayIngestedAt: number | null = null;
   let observedUri: string | null = null;
