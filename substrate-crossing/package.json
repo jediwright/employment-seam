@@ -1,0 +1,26 @@
+{
+  "name": "@employment-seam/substrate-crossing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PC#8 substrate-crossing seam prototype - sub-package of jediwright/employment-seam (Option A, build plan v0.1 Item 0.1)",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "check:pds": "tsx scripts/check-pds.ts",
+    "baseline:0-3": "tsx scripts/item-0-3-baseline.ts"
+  },
+  "dependencies": {
+    "@atproto/api": "^0.20.41",
+    "@automerge/automerge": "^3.4.1",
+    "@automerge/automerge-repo-keyhive": "0.5.0-alpha.1",
+    "@automerge/automerge-subduction": "^0.16.0",
+    "@types/ws": "^8.18.1",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "dotenv": "^16.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.10"
+  }
+}

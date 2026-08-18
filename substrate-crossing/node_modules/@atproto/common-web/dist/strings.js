@@ -1,0 +1,34 @@
+import { fromBase64, graphemeLen, toBase64, utf8Len } from '@atproto/lex-data';
+import { isValidLanguage, parseLanguageString, } from '@atproto/syntax';
+/**
+ * @deprecated Use {@link graphemeLen} from `@atproto/lex-data` instead.
+ */
+const graphemeLenLegacy = graphemeLen;
+export { graphemeLenLegacy as graphemeLen };
+/**
+ * @deprecated Use {@link utf8Len} from `@atproto/lex-data` instead.
+ */
+const utf8LenLegacy = utf8Len;
+export { utf8LenLegacy as utf8Len };
+/**
+ * @deprecated Use {@link parseLanguageString} from `@atproto/syntax` instead.
+ */
+const parseLanguageLegacy = parseLanguageString;
+export { parseLanguageLegacy as parseLanguage };
+/**
+ * @deprecated Use {@link isLanguageString} from `@atproto/syntax` instead.
+ */
+export const validateLanguage = isValidLanguage;
+/**
+ * @deprecated Use {@link toBase64} from `@atproto/lex-data` instead.
+ */
+export const utf8ToB64Url = (utf8) => {
+    return toBase64(new TextEncoder().encode(utf8), 'base64url');
+};
+/**
+ * @deprecated Use {@link fromBase64} from `@atproto/lex-data` instead.
+ */
+export const b64UrlToUtf8 = (b64) => {
+    return new TextDecoder().decode(fromBase64(b64, 'base64url'));
+};
+//# sourceMappingURL=strings.js.map
