@@ -1,4 +1,4 @@
-B# PC#8 Observation Log — Template
+# PC#8 Observation Log — Template
 
 **Instrument:** PC#8 build plan v0.1 §H.3 observation log format
 **Produced:** 2026-08-17 (Phase 0 closing deliverable, per session scope)
