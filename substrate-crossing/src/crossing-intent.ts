@@ -200,7 +200,11 @@ export type CrossingEvent =
   | 'intent-record-read-confirmed'
   | 'timeout-horizon-expired'
   | 'put-record-fired'
-  | 'put-record-accepted';
+  | 'put-record-accepted'
+  // Item 1.3 — the intent-without-completion window's closing edge
+  // (COMPLETION_WRITTEN_EVENT in crossing-fire.ts; stamped by
+  // writeCrossingCompletion() at the completion record's document write).
+  | 'completion-record-written';
 
 export interface CrossingLogEntry {
   event: CrossingEvent;

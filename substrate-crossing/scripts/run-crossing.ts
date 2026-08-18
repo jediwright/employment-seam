@@ -1,5 +1,6 @@
 /**
- * PC#8 Phase 1, Item 1.2 — Operator-run instrumented governed crossing.
+ * PC#8 Phase 1, Items 1.2 + 1.3 — Operator-run instrumented governed
+ * crossing, completion-capable.
  *
  * OPERATOR-RUN: requires live network access to bsky.social and Jetstream,
  * which the authoring container does not have (same split as Item 0.2).
@@ -23,16 +24,19 @@
  * delivery-not-application holds for machine-emitted entries; paste it in
  * by hand).
  *
- * What this run IS NOT yet: a completable crossing. Item 1.3 (completion
- * record) is out of this session's scope, so the CompletionHook stays
- * unmarked, completion_written_at is null, and the honest outcome for a
- * successful fire at this stage is `timeout` once the horizon elapses —
- * the crossing reads `crossing-unconfirmed` per the failure taxonomy. The
- * script waits out the horizon (bounded by --horizon-s) so the emitted
- * outcome is taxonomy-true rather than a placeholder. The three canonical
- * KL-1 baseline runs (AC-1.1–1.4) are therefore expected AFTER Item 1.3
- * lands; a run now still yields real PDS-accept / relay-ingest numbers and
- * a genuine crossing-unconfirmed legibility observation.
+ * Item 1.3 (this session): on a successful fire, the crossing-completion
+ * record is written to the Automerge document (crossingIntentRef →
+ * content address of the intent record; crossingTargetURI/CID from the
+ * PDS response; relayIngestedAt when observed). The CompletionHook is
+ * marked at the document write — the window's closing edge — so
+ * completion_written_at and intent_without_completion_window_ms populate
+ * in the §H.3 entry and the outcome converts to `completed`
+ * (taxonomy: crossing-complete). The document-legible state is printed
+ * from deriveDocumentCrossingState() — the fail-closed legibility check
+ * run against the document alone. A failed publish (--scenario failed)
+ * still mints NO completion record: intent-without-completion remains
+ * the legible state. The three canonical KL-1 baseline runs (AC-1.1–1.4)
+ * are now runnable.
  *
  * NOTE: unlike the Phase 0 probes, the record published here IS a governed
  * crossing artifact — leave it in place until the KL-1/KL-2 evidence
@@ -55,6 +59,11 @@ import {
   type WhtwndEntryRecord,
 } from '../src/crossing-fire.js';
 import { buildH3Entry, renderH3Entry, writeH3EntryFile } from '../src/observation-log.js';
+import {
+  writeCrossingCompletion,
+  deriveDocumentCrossingState,
+  type CompletionDocShape,
+} from '../src/crossing-completion.js';
 // Real Keyhive substrate — same wiring as item-0-3-baseline / Item 1.1 tests.
 import '@automerge/automerge';
 import '@automerge/automerge-subduction';
@@ -83,15 +92,15 @@ const SCENARIO = flag('scenario', 'baseline') as 'baseline' | 'failed';
 const HORIZON_S = Number(flag('horizon-s', '120'));
 
 const ACK =
-  'I acknowledge that this crossing terminates seam-stack enforcement at the AT Protocol boundary; recall is a propagated request. (Operator-authored, Item 1.2 instrumented run.)';
+  'I acknowledge that this crossing terminates seam-stack enforcement at the AT Protocol boundary; recall is a propagated request. (Operator-authored, Items 1.2+1.3 completion-capable run.)';
 
 async function main() {
   if (!HANDLE || !APP_PASSWORD) {
-    console.error('[1.2] Missing PDS_HANDLE / PDS_APP_PASSWORD in .env');
+    console.error('[1.3] Missing PDS_HANDLE / PDS_APP_PASSWORD in .env');
     process.exit(1);
   }
   if (!Number.isInteger(RUN_N) || RUN_N < 1) {
-    console.error('[1.2] --run must be a positive integer');
+    console.error('[1.3] --run must be a positive integer');
     process.exit(1);
   }
 
@@ -99,7 +108,7 @@ async function main() {
   const agent = new AtpAgent({ service: PDS_SERVICE });
   await agent.login({ identifier: HANDLE, password: APP_PASSWORD });
   const did = agent.session!.did;
-  console.log(`[1.2] createSession() OK did=${did}`);
+  console.log(`[1.3] createSession() OK did=${did}`);
 
   // --- 1. Local Keyhive substrate: doc + real grant (Item 0.3 pattern) ---
   const [ownerNet, actorNet] = PairNetworkAdapter.createConnectedPair();
@@ -146,7 +155,7 @@ async function main() {
     }
   }
   if (!granted) throw new Error('doc never became keyhive-protected');
-  console.log('[1.2] Keyhive doc + read grant established:', handle.url);
+  console.log('[1.3] Keyhive doc + read grant established:', handle.url);
 
   const gate: GateCheckFn = async () => {
     const access = await owner.hive.accessForDoc(individual!.id, handle.url);
@@ -172,7 +181,7 @@ async function main() {
     wsFactory: (url) => new WebSocket(url) as any,
   });
   await watcher.start();
-  console.log(`[1.2] relay subscription open: ${JETSTREAM} (client-side DID+collection filter)`);
+  console.log(`[1.3] relay subscription open: ${JETSTREAM} (client-side DID+collection filter)`);
 
   // --- 3. Timed live publish (the injected PutRecordFn seam) ---
   const record: WhtwndEntryRecord = {
@@ -202,10 +211,11 @@ async function main() {
   // --- 4. The governed crossing ---
   const horizon = new Date(Date.now() + HORIZON_S * 1000).toISOString();
   const log: CrossingLogEntry[] = [];
-  const hook = createCompletionHook(); // Item 1.3 closes this edge; unmarked here.
+  const hook = createCompletionHook(); // marked by writeCrossingCompletion() — the closing edge
 
   let outcomeStatus: string;
   let intentEmittedAt: string | null = null;
+  let firedIntent: import('../src/crossing-intent.js').CrossingIntentRecord | null = null;
   let fireError: string | null = null;
   try {
     const outcome = await initiateCrossing({
@@ -221,7 +231,8 @@ async function main() {
     outcomeStatus = outcome.status;
     if (outcome.status === 'fired') {
       intentEmittedAt = outcome.intent.emittedAt;
-      console.log(`[1.2] fired: uri=${outcome.put.uri} cid=${outcome.put.cid}`);
+      firedIntent = outcome.intent;
+      console.log(`[1.3] fired: uri=${outcome.put.uri} cid=${outcome.put.cid}`);
     }
   } catch (e: any) {
     // Publish threw: intent record remains document-resident; no completion.
@@ -229,7 +240,7 @@ async function main() {
     fireError = String(e?.message ?? e);
     const doc = await handle.doc();
     intentEmittedAt = (doc.crossingRecords ?? []).at(-1)?.emittedAt ?? null;
-    console.error(`[1.2] publish failed (crossing-intent-failed posture): ${fireError}`);
+    console.error(`[1.3] publish failed (crossing-intent-failed posture): ${fireError}`);
   }
 
   // --- 5. Relay observation (success path) ---
@@ -239,32 +250,52 @@ async function main() {
     relayIngestedAt = relay.relayIngestedAt;
     console.log(
       relay.timedOut
-        ? `[1.2] relay event NOT observed within ${RELAY_TIMEOUT_MS}ms (H.3 null)`
-        : `[1.2] relay ingested: ${relay.observedUri}`,
+        ? `[1.3] relay event NOT observed within ${RELAY_TIMEOUT_MS}ms (H.3 null)`
+        : `[1.3] relay ingested: ${relay.observedUri}`,
     );
   }
   watcher.close();
 
-  // --- 6. Honest outcome for the H.3 entry ---
-  // fired + no completion machinery (Item 1.3 pending): wait out the horizon
-  // so the state is genuinely crossing-unconfirmed, then emit `timeout`.
-  // fire-failed / gate-blocked / horizon-expired map per the taxonomy.
+  // --- 6. Item 1.3 — write the crossing-completion record (success path) ---
+  // On a successful fire the completion record closes the intent: hook is
+  // marked at the document write (the window's closing edge), the outcome
+  // converts to `completed` (taxonomy: crossing-complete), and the window
+  // becomes computable. A failed publish never reaches this block — no
+  // completion record is minted; intent-without-completion stays legible.
   let h3Outcome: 'completed' | 'failed' | 'timeout';
   let kl1: string;
   if (outcomeStatus === 'fired') {
-    const remaining = Date.parse(horizon) - Date.now();
-    if (remaining > 0) {
+    try {
+      const completion = await writeCrossingCompletion({
+        handle,
+        intent: firedIntent!,
+        put: { uri: timings.uri, cid: timings.cid },
+        pdsAcceptedAt: timings.pdsAcceptedAt,
+        relayIngestedAt,
+        hook,
+        log,
+      });
+      const doc = (await handle.doc()) as CompletionDocShape;
+      const state = deriveDocumentCrossingState(doc);
       console.log(
-        `[1.2] completion machinery pending Item 1.3 — waiting ${Math.ceil(remaining / 1000)}s for horizon elapse so the emitted outcome is taxonomy-true (crossing-unconfirmed)…`,
+        `[1.3] completion record written: crossingIntentRef=${completion.crossingIntentRef.slice(0, 32)}… targetCID=${completion.crossingTargetCID}`,
       );
-      await new Promise((r) => setTimeout(r, remaining + 50));
+      console.log(`[1.3] document-legible state (no external lookup): ${state}`);
+      h3Outcome = 'completed';
+      kl1 =
+        `Fired; publish accepted; crossing-completion record written and confirmed document-resident (crossingIntentRef content-addresses the intent record; crossingTargetCID matches the PDS response). Document-legible state: ${state}. A deferred party reading the document sees intent AND ref-matched completion: crossing-complete — chain closed.`;
+    } catch (e: any) {
+      // completion-mint-failed: crossing happened; chain reads unconfirmed.
+      const mintErr = String(e?.message ?? e);
+      console.error(`[1.3] completion mint FAILED (worst-case taxonomy state): ${mintErr}`);
+      const remaining = Date.parse(horizon) - Date.now();
+      if (remaining > 0) await new Promise((r) => setTimeout(r, remaining + 50));
+      h3Outcome = 'timeout';
+      kl1 = `Publish accepted but completion record minting failed (${mintErr}): completion-mint-failed — crossing happened; the chain reads crossing-unconfirmed unless a completion is retroactively minted (author-declared; KL-8).`;
     }
-    h3Outcome = 'timeout';
-    kl1 =
-      'Fired; publish accepted; completion record machinery not yet implemented (Item 1.3 pending). At horizon elapse a deferred party reading the document sees the intent record with no completion: state reads crossing-unconfirmed — distinguishable from not-yet-initiated (no intent record) and from completed (no completion record present).';
   } else if (outcomeStatus === 'fire-failed') {
     h3Outcome = 'failed';
-    kl1 = `Publish failed (${fireError}). Intent record remains document-resident with no completion: crossing-intent-failed, legible without external lookup; retry requires a new gate pass (KL-8a).`;
+    kl1 = `Publish failed (${fireError}). Intent record remains document-resident with no completion: crossing-intent-failed, legible without external lookup (deriveDocumentCrossingState reads crossing-intent-pending → crossing-unconfirmed at horizon elapse); retry requires a new gate pass (KL-8a).`;
   } else {
     h3Outcome = 'failed';
     kl1 = `Crossing did not fire (${outcomeStatus}). See crossing log for the blocking event.`;
@@ -279,29 +310,29 @@ async function main() {
     putRecordCalledAt: timings.putRecordCalledAt,
     pdsAcceptedAt: timings.pdsAcceptedAt,
     relayIngestedAt,
-    completionWrittenAt: hook.completionWrittenAt, // null until Item 1.3
+    completionWrittenAt: hook.completionWrittenAt, // closing edge (null on failed runs)
     crossingOutcome: h3Outcome,
     kl1Observation: kl1,
     kl2Observation:
-      'n/a at Item 1.2 (seamCrossingRef is Item 1.4; CID captured for the Item 1.3 completion record)',
+      'n/a until Item 1.4 (seamCrossingRef back-pointer); crossingTargetCID carried into the completion record',
   });
-  console.log('\n' + renderH3Entry(entry, `Item 1.2 instrumented run (${SCENARIO})`));
+  console.log('\n' + renderH3Entry(entry, `Item 1.3 completion-capable run (${SCENARIO})`));
   const outPath = writeH3EntryFile(entry, {
-    runLabel: `Item 1.2 instrumented run (${SCENARIO})`,
+    runLabel: `Item 1.3 completion-capable run (${SCENARIO})`,
   });
-  console.log(`[1.2] H.3 entry written to ${outPath}`);
-  console.log('[1.2] Paste the block into the canonical observation log by hand (append-only).');
+  console.log(`[1.3] H.3 entry written to ${outPath}`);
+  console.log('[1.3] Paste the block into the canonical observation log by hand (append-only).');
 
   // --- 8. Full crossing log to stderr-adjacent file note ---
-  console.log('[1.2] crossing log (ordered):');
+  console.log('[1.3] crossing log (ordered):');
   for (const l of log) console.log(`       ${l.at}  ${l.event}${l.detail ? `  (${l.detail})` : ''}`);
-  if (timings.cid) console.log(`[1.2] captured CID (→ crossingTargetCID at Item 1.3): ${timings.cid}`);
+  if (timings.cid) console.log(`[1.3] captured CID (→ crossingTargetCID at Item 1.3): ${timings.cid}`);
 
-  console.log(`[1.2] ITEM 1.2 INSTRUMENTED RUN: ${outcomeStatus.toUpperCase()}`);
+  console.log(`[1.3] ITEM 1.3 COMPLETION-CAPABLE RUN: ${outcomeStatus.toUpperCase()}`);
   process.exit(0);
 }
 
 main().catch((e) => {
-  console.error('[1.2] ITEM 1.2 RUN: FAIL', e);
+  console.error('[1.3] ITEM 1.3 RUN: FAIL', e);
   process.exit(1);
 });
