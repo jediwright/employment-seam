@@ -8,7 +8,9 @@
     "test": "vitest run",
     "check:pds": "tsx scripts/check-pds.ts",
     "baseline:0-3": "tsx scripts/item-0-3-baseline.ts",
-    "run:crossing": "tsx scripts/run-crossing.ts"
+    "run:crossing": "tsx scripts/run-crossing.ts",
+    "verify:firehose": "tsx scripts/verify-firehose-payload.ts",
+    "verify:cid": "tsx scripts/verify-cid.ts"
   },
   "dependencies": {
     "@atproto/api": "^0.20.41",
