@@ -80,3 +80,25 @@ kl2_back_pointer_observation:
 
 *Append-only. Canonical copy: operator's machine, then `substrate-crossing/docs/`
 in the employment-seam repo once Phase 1 opens.*
+<!-- Machine-emitted §H.3 entry — Item 1.2 instrumentation.
+     NOT the canonical observation log. Paste the block below into
+     observation-log-template-pc08.md by hand (append-only,
+     delivery-not-application). -->
+
+### Run 1 — Item 1.2 instrumented run (baseline)
+
+```
+crossing_run:        1
+scenario:            baseline
+intent_emitted_at:   2026-08-18T16:22:31.566Z
+putrecord_called_at: 2026-08-18T16:22:31.583Z
+pds_accepted_at:     2026-08-18T16:22:31.904Z
+relay_ingested_at:   2026-08-18T16:22:32.108Z
+completion_written_at: null
+crossing_outcome:    timeout
+pds_accept_latency_ms: 321
+relay_ingest_gap_ms: 204
+intent_without_completion_window_ms: null
+kl1_legibility_observation: Fired; publish accepted; completion record machinery not yet implemented (Item 1.3 pending). At horizon elapse a deferred party reading the document sees the intent record with no completion: state reads crossing-unconfirmed — distinguishable from not-yet-initiated (no intent record) and from completed (no completion record present).
+kl2_back_pointer_observation: n/a at Item 1.2 (seamCrossingRef is Item 1.4; CID captured for the Item 1.3 completion record)
+```
