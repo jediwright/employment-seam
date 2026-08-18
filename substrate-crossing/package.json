@@ -16,16 +16,18 @@
     "@atproto/api": "^0.20.41",
     "@automerge/automerge": "^3.4.1",
     "@automerge/automerge-repo-keyhive": "0.5.0-alpha.1",
-    "@automerge/automerge-subduction": "0.16.0",
-    "@types/ws": "^8.18.1",
-    "ws": "^8.21.3"
+    "@automerge/automerge-subduction": "0.16.0"
   },
   "devDependencies": {
+    "@atproto/common": "^0.8.0",
+    "@atproto/lexicon": "^0.7.11",
     "@types/debug": "^4.1.13",
     "@types/node": "^26.2.0",
+    "@types/ws": "^8.18.1",
     "dotenv": "^16.4.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "ws": "^8.21.3"
   }
 }
