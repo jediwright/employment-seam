@@ -155,3 +155,20 @@ intent_without_completion_window_ms: 628
 kl1_legibility_observation: Fired; publish accepted; crossing-completion record written and confirmed document-resident (crossingIntentRef content-addresses the intent record; crossingTargetCID matches the PDS response). Document-legible state: crossing-complete. A deferred party reading the document sees intent AND ref-matched completion: crossing-complete — chain closed. The published record carries seamCrossingRef: the chain is traversable from the AT Protocol side back to the governed document.
 kl2_back_pointer_observation: seamCrossingRef attached at publish; INTACT in getRecord() (4-field match vs fired intent); PRESENT in raw Jetstream commit payload (capture file docs/firehose-captures/3mtf65fcgvf2s_2026-08-18T21-32-39-855Z.raw.json) with 4/4 firehose↔PDS field parity. AppView rendering drop previously confirmed (Run 4, whtwnd.com). Firehose event CID == getRecord CID == putRecord CID (bafyreiejm4uqepsz553mmbvieuveufylw6iedu2unhiaj76vcva7i2wrba). Relay timestamp note: runner-observed ingest .852Z (H.3 field, method-continuous with Runs 1–4); capture-script time_us-derived .893Z recorded in the capture file.
 ```
+
+### Item 2.2 note — CID-anchor stability verification (AC-2.3 / AC-2.4)
+
+```
+verified_runs:       2, 4, 5 (rkeys 3mteosxkzms27, 3mtevg2odx424, 3mtf65fcgvf2s)
+putrecord_cids:      recovered from runner console output (fired: lines), cross-confirmed
+                     against each run's completion-record targetCID
+round_trip_ac23:     3/3 MATCH (putRecord CID == getRecord CID for all three)
+content_address_ac24: 3/3 MATCH (CID independently recomputed from record content via
+                     jsonToLex + cidForCbor, atproto derivation; matches PDS-returned CID)
+run_cids:            Run 2 = bafyreicmlwc3hv42dk3a34lxledd22syjc3zfvu6boqorn2qohdgi76yly
+                     Run 4 = bafyreifp2f3wiuquv4lcxsxfmoxdrrl7n5jh3utwzrqcdrblbs5uibiwua
+                     Run 5 = bafyreiejm4uqepsz553mmbvieuveufylw6iedu2unhiaj76vcva7i2wrba
+                     Run 1 = bafyreify3v7no62eezhbcvfzpiqwe7a5dblyhkwbbffpy37h5eznp3btdq (provenance only)
+note:                CID is content-addressed and stable across PDS retrieve; migration
+                     stability deferred.
+```
