@@ -39,7 +39,18 @@ It is the first Pattern Commons entry where all four layers of the [Seam Stack](
 - The `seam:CrossingRecord` base shape provides a unified, chain-aware schema that all governed-event record types instantiate: gate-check records, lineage records, AI-provenance records, and code-change verification records compose uniformly against a single auditable structure
 - A P13 evidence plane implements multi-party governance record types — `SeamTermAmendmentRecord`, `ObjectionRecord`, `ConsentRecord`, `ResolutionRecord` — all finality-arbiter-free: consent is derived from the record set, not from a coordinator; amendment status is a pure derivation, never stored in any record
 
-**Implementation status:** 191/191 tests passing (164 base + 27 P13 D2-C2 threshold/quorum). Items 1.1 and 1.2 — degraded-sync behavior and two-state revocation — are implemented in simulation (`degradedSync.test.ts`, 8/8 passing); the live-relay observation leg (DevTools throttling against the Subduction relay) ran 2026-08-16 across all three profiles (3G, Offline, Intermittent); findings in `phase1-degraded-sync-observations.md`.
+## Pattern Commons #8 — Substrate-Crossing Seam (prototype, Phase 0)
+
+`substrate-crossing/` is a sub-package prototype for Pattern Commons #8:
+the governed crossing from a local-first Automerge/Keyhive substrate into
+AT Protocol (bsky.social). It tests the KL-1 and KL-2 claims from the
+[PC#8 spec](https://github.com/jediwright/local-first-series) — that a
+governed crossing with an honest declared bound is legible to a deferred
+party and that the completion record's CID anchor is stable and
+verifiable. Phase 0 complete; Phase 1 (crossing-intent record and
+instrumented putRecord) open.
+
+**Implementation status:** 191/191 tests passing (164 base + 27 P13 D2-C2 threshold/quorum). Items 1.1 and 1.2 — degraded-sync behavior and two-state revocation — are implemented in simulation (`degradedSync.test.ts`, 8/8 passing); the live-relay observation leg (DevTools throttling against the Subduction relay) ran 2026-08-16 across all three profiles (3G, Offline, Intermittent); findings in `phase1-degraded-sync-observations.md`. The substrate-crossing/ sub-package (PC#8) runs a separate test suite; Phase 1 tests pending.
 
 See `keyhive-employment-seam/README.md` for run instructions.
 
