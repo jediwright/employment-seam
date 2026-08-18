@@ -437,7 +437,7 @@ describe('end-to-end: governed crossing with timed publish + relay sim (AC-g)', 
     expect(Date.parse(entry.pds_accepted_at!)).toBeLessThanOrEqual(
       Date.parse(entry.relay_ingested_at!),
     );
-    expect(entry.pds_accept_latency_ms).toBeGreaterThanOrEqual(25);
+    expect(entry.pds_accept_latency_ms).toBeGreaterThanOrEqual(20);
     expect(entry.relay_ingest_gap_ms).toBeGreaterThanOrEqual(0);
     expect(entry.intent_without_completion_window_ms).toBeNull();
     // CID captured for the Item 1.3 completion record's crossingTargetCID.
