@@ -460,7 +460,7 @@ describe('end-to-end: gate → intent → publish → completion (AC-o)', () => 
       return access !== undefined
         ? {
             result: 'pass',
-            grantReference: `keyhive:${String(individual!.id)}:read`,
+            grantReference: `keyhive:${Buffer.from(individual!.id.toBytes()).toString('hex')}:read`,
             gateCheckedAt: new Date().toISOString(),
           }
         : {

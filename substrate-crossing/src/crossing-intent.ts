@@ -183,8 +183,15 @@ export interface GateCheckResult {
 export type GateCheckFn = () => Promise<GateCheckResult>;
 
 /** Injected publish call. Item 1.1 instruments ordering; Item 1.2 wires
- *  the live @atproto/api putRecord(). */
-export type PutRecordFn = () => Promise<{ uri: string; cid: string }>;
+ *  the live @atproto/api putRecord(). Item 1.4: the minted intent record
+ *  is passed to the fire step so the published payload can carry a
+ *  seamCrossingRef derived from the authorizing intent itself (the
+ *  payload cannot disagree with the intent). Zero-argument
+ *  implementations remain assignable — the parameter is optional to
+ *  consume. */
+export type PutRecordFn = (
+  intent?: CrossingIntentRecord,
+) => Promise<{ uri: string; cid: string }>;
 
 export type Clock = () => Date;
 
@@ -355,9 +362,9 @@ export async function initiateCrossing(
     };
   }
 
-  // 6 — fire
+  // 6 — fire (the minted intent travels with the fire — Item 1.4)
   stamp('put-record-fired');
-  const put = await p.putRecord();
+  const put = await p.putRecord(intent);
   stamp('put-record-accepted', put.cid);
 
   return { status: 'fired', intent, put, log };

@@ -24,20 +24,26 @@
  * write, completion_written_at is null and the intent-without-completion
  * window is applicable-but-unobserved (§H.3 null).
  */
-import type { PutRecordFn, Clock } from './crossing-intent.js';
+import type { PutRecordFn, Clock, CrossingIntentRecord } from './crossing-intent.js';
+import { buildSeamCrossingRef, type SeamCrossingRef } from './seam-crossing-ref.js';
 
 // ---------------------------------------------------------------------------
 // Timed live publish — PDS-accept instrumentation (AC-1.2)
 // ---------------------------------------------------------------------------
 
-/** The com.whtwnd.blog.entry record shape published at this item.
- *  Item 1.4 (out of scope) later adds seamCrossingRef. */
+/** The com.whtwnd.blog.entry record shape published from Item 1.2 on.
+ *  Item 1.4: seamCrossingRef — the KL-2 back-pointer. OPTIONAL and never
+ *  load-bearing (spec asymmetric-bridge posture): com.whtwnd.blog.entry
+ *  does not define it; AT Protocol lexicons are extensible with unknown
+ *  fields, PDSes are required to store them, and whether AppViews carry
+ *  them through is precisely the KL-2 question. */
 export interface WhtwndEntryRecord {
   $type: 'com.whtwnd.blog.entry';
   title: string;
   content: string;
   createdAt: string;
   visibility: 'public';
+  seamCrossingRef?: SeamCrossingRef;
 }
 
 /** Injected concrete publish call. run-crossing.ts wires the real
@@ -73,11 +79,26 @@ export function makeTimedPutRecord(params: {
   record: WhtwndEntryRecord;
   timings: LivePutTimings;
   clock?: Clock;
+  /** Item 1.4: when true, the published payload carries a seamCrossingRef
+   *  derived at fire time from the minted intent record that
+   *  initiateCrossing() passes in (write-before-fire guarantees the
+   *  intent exists before this runs). Default false — the back-pointer
+   *  is optional and never load-bearing; earlier-item payload shapes are
+   *  unchanged unless this is enabled. */
+  attachSeamCrossingRef?: boolean;
 }): PutRecordFn {
   const clock = params.clock ?? (() => new Date());
-  return async () => {
+  return async (intent?: CrossingIntentRecord) => {
+    if (params.attachSeamCrossingRef && !intent) {
+      throw new Error(
+        'seamCrossingRef attachment requires the authorizing intent record: the back-pointer has no other source (fire via initiateCrossing(), which passes the minted intent)',
+      );
+    }
+    const payload: WhtwndEntryRecord = params.attachSeamCrossingRef
+      ? { ...params.record, seamCrossingRef: buildSeamCrossingRef(intent!) }
+      : params.record;
     params.timings.putRecordCalledAt = clock().toISOString();
-    const res = await params.publish(params.record);
+    const res = await params.publish(payload);
     params.timings.pdsAcceptedAt = clock().toISOString();
     params.timings.uri = res.uri;
     params.timings.cid = res.cid;
