@@ -119,3 +119,21 @@ kl2_back_pointer_observation: n/a until Item 1.4 (seamCrossingRef back-pointer);
 ---
 
 *Append-only. Canonical copy: operator's machine; `substrate-crossing/docs/` in the employment-seam repo.*
+
+### Run 4 — Item 1.4 back-pointer-carrying run (baseline)
+
+```
+crossing_run:        4
+scenario:            baseline
+intent_emitted_at:   2026-08-18T18:56:26.513Z
+putrecord_called_at: 2026-08-18T18:56:26.531Z
+pds_accepted_at:     2026-08-18T18:56:26.906Z
+relay_ingested_at:   2026-08-18T18:56:27.135Z
+completion_written_at: 2026-08-18T18:56:27.230Z
+crossing_outcome:    completed
+pds_accept_latency_ms: 375
+relay_ingest_gap_ms: 229
+intent_without_completion_window_ms: 700
+kl1_legibility_observation: Fired; publish accepted; crossing-completion record written and confirmed document-resident (crossingIntentRef content-addresses the intent record; crossingTargetCID matches the PDS response). Document-legible state: crossing-complete. A deferred party reading the document sees intent AND ref-matched completion: crossing-complete — chain closed. The published record carries the Item 1.4 seamCrossingRef: the chain is now traversable from the AT Protocol side back to the governed document.
+kl2_back_pointer_observation: seamCrossingRef attached at publish and returned INTACT by getRecord() (crossingIntentRef + authorizedContentDigest + sourceDocumentURI/CID all match the fired intent record). Back-pointer survives PDS storage. AppView surface/drop (whtwnd.com): DROPPED at rendering layer — field not surfaced in WhiteWind AppView UI (whtwnd.com/did:plc:4xoefmmbsulm4xns3kbb6mnk/3mtevg2odx424); standard $type content fields only rendered. Back-pointer survives to PDS layer; dropped at AppView rendering. Deep round-trip (firehose payload; AppView backing store) is Phase 2 Item 2.1.
+```
