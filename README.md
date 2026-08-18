@@ -47,10 +47,9 @@ AT Protocol (bsky.social). It tests the KL-1 and KL-2 claims from the
 [PC#8 spec](https://github.com/jediwright/local-first-series) — that a
 governed crossing with an honest declared bound is legible to a deferred
 party and that the completion record's CID anchor is stable and
-verifiable. Phase 0 complete; Phase 1 (crossing-intent record and
-instrumented putRecord) open.
+verifiable. Phase 1 complete (Items 1.1–1.4: crossing-intent record, instrumented putRecord, crossing-completion record, seamCrossingRef back-pointer); observation log through Run 4; KL-1/KL-2 closing-evidence artifact pending.
 
-**Implementation status:** 191/191 tests passing (164 base + 27 P13 D2-C2 threshold/quorum). Items 1.1 and 1.2 — degraded-sync behavior and two-state revocation — are implemented in simulation (`degradedSync.test.ts`, 8/8 passing); the live-relay observation leg (DevTools throttling against the Subduction relay) ran 2026-08-16 across all three profiles (3G, Offline, Intermittent); findings in `phase1-degraded-sync-observations.md`. The substrate-crossing/ sub-package (PC#8) runs a separate test suite; Phase 1 tests pending.
+**Implementation status:** 191/191 tests passing (164 base + 27 P13 D2-C2 threshold/quorum). Items 1.1 and 1.2 — degraded-sync behavior and two-state revocation — are implemented in simulation (`degradedSync.test.ts`, 8/8 passing); the live-relay observation leg (DevTools throttling against the Subduction relay) ran 2026-08-16 across all three profiles (3G, Offline, Intermittent); findings in `phase1-degraded-sync-observations.md`. The substrate-crossing/ sub-package (PC#8) runs a separate suite: 27/27 passing (Items 1.1–1.4); Phase 1 complete.
 
 See `keyhive-employment-seam/README.md` for run instructions.
 
