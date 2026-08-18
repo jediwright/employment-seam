@@ -1,10 +1,9 @@
-# PC#8 Observation Log — Template
+# PC#8 Observation Log
 
 **Instrument:** PC#8 build plan v0.1 §H.3 observation log format
 **Produced:** 2026-08-17 (Phase 0 closing deliverable, per session scope)
 **Feeds:** `pc08-kl1-kl2-closing-evidence_YYYY-MM-DD.md`
-**Status:** TEMPLATE — no observations recorded. Phase 1 instrumentation
-must not begin before this file exists (build plan §5 item 4). One entry
+**Status:** ACTIVE — entries appended through Run 3 (2026-08-18). One entry
 block per crossing run; append-only; do not edit prior entries.
 
 Field definitions are normative per §H.3. Timestamps are ISO 8601 with
@@ -57,33 +56,7 @@ kl1_legibility_observation: n/a (no intent record exists for this run)
 kl2_back_pointer_observation: n/a (no completion record exists for this run)
 ```
 
-
-### Run 1 — (first Phase 1 governed crossing; append below)
-
-```
-crossing_run:        1
-scenario:            
-intent_emitted_at:   
-putrecord_called_at: 
-pds_accepted_at:     
-relay_ingested_at:   
-completion_written_at: 
-crossing_outcome:    
-pds_accept_latency_ms: 
-relay_ingest_gap_ms: 
-intent_without_completion_window_ms: 
-kl1_legibility_observation: 
-kl2_back_pointer_observation: 
-```
-
 ---
-
-*Append-only. Canonical copy: operator's machine, then `substrate-crossing/docs/`
-in the employment-seam repo once Phase 1 opens.*
-<!-- Machine-emitted §H.3 entry — Item 1.2 instrumentation.
-     NOT the canonical observation log. Paste the block below into
-     observation-log-template-pc08.md by hand (append-only,
-     delivery-not-application). -->
 
 ### Run 1 — Item 1.2 instrumented run (baseline)
 
@@ -102,3 +75,47 @@ intent_without_completion_window_ms: null
 kl1_legibility_observation: Fired; publish accepted; completion record machinery not yet implemented (Item 1.3 pending). At horizon elapse a deferred party reading the document sees the intent record with no completion: state reads crossing-unconfirmed — distinguishable from not-yet-initiated (no intent record) and from completed (no completion record present).
 kl2_back_pointer_observation: n/a at Item 1.2 (seamCrossingRef is Item 1.4; CID captured for the Item 1.3 completion record)
 ```
+
+---
+
+### Run 2 — Item 1.3 completion-capable run (baseline)
+
+```
+crossing_run:        2
+scenario:            baseline
+intent_emitted_at:   2026-08-18T16:58:23.275Z
+putrecord_called_at: 2026-08-18T16:58:23.286Z
+pds_accepted_at:     2026-08-18T16:58:23.610Z
+relay_ingested_at:   2026-08-18T16:58:23.769Z
+completion_written_at: 2026-08-18T16:58:23.773Z
+crossing_outcome:    completed
+pds_accept_latency_ms: 324
+relay_ingest_gap_ms: 159
+intent_without_completion_window_ms: 487
+kl1_legibility_observation: Fired; publish accepted; crossing-completion record written and confirmed document-resident (crossingIntentRef content-addresses the intent record; crossingTargetCID matches the PDS response). Document-legible state: crossing-complete. A deferred party reading the document sees intent AND ref-matched completion: crossing-complete — chain closed.
+kl2_back_pointer_observation: n/a until Item 1.4 (seamCrossingRef back-pointer); crossingTargetCID carried into the completion record
+```
+
+---
+
+### Run 3 — Item 1.3 completion-capable run (failed)
+
+```
+crossing_run:        3
+scenario:            failed
+intent_emitted_at:   2026-08-18T17:04:33.501Z
+putrecord_called_at: 2026-08-18T17:04:33.519Z
+pds_accepted_at:     null
+relay_ingested_at:   null
+completion_written_at: null
+crossing_outcome:    failed
+pds_accept_latency_ms: null
+relay_ingest_gap_ms: null
+intent_without_completion_window_ms: null
+kl1_legibility_observation: Publish failed (Invalid NSID (got "com.whtwnd.invalid.collection!") at $.collection). Intent record remains document-resident with no completion: crossing-intent-failed, legible without external lookup (deriveDocumentCrossingState reads crossing-intent-pending → crossing-unconfirmed at horizon elapse); retry requires a new gate pass (KL-8a).
+kl2_back_pointer_observation: n/a until Item 1.4 (seamCrossingRef back-pointer); crossingTargetCID carried into the completion record
+```
+
+---
+
+*Append-only. Canonical copy: operator's machine; `substrate-crossing/docs/` in the employment-seam repo.*
