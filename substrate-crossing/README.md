@@ -6,10 +6,8 @@ Item 0.1, decision recorded 2026-08-17).
 **Governing spec:** `pattern-commons-08-substrate-crossing-seam-v0-1-3_2026-08-17.md`
 **Build plan:** `pc08-build-plan-v0-1_2026-08-17.md`
 
-## Operator apply (Option A placement)
+## Getting started — verify your local setup
 
-Copy this directory into the employment-seam repo root as
-`substrate-crossing/`, then:
 
 ```bash
 cd substrate-crossing
