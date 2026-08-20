@@ -1,0 +1,19 @@
+{
+  "recordType": "handoff-bundle",
+  "bundleId": "sample-qd-check-001",
+  "seam:schemaVersionDeclaration": {
+    "seam:vocabVersion": "0.5",
+    "seam:vocabIRI": "https://seamstack.org/vocab/employment-seam/0.5#",
+    "seam:declaredAt": "2026-08-19T14:02:00Z",
+    "seam:lineageRecordRef": {
+      "seam:refType": "content-address",
+      "seam:ref": "lineage-sha256:8b0041ca3da9166c4d0428d1863207cdd1dba0f9560a40de8b8f6cb2f12031a0",
+      "seam:lineageEntryId": "L-6"
+    },
+    "seam:horizonAtCrossing": {
+      "seam:state": "supported",
+      "seam:supportHorizon": "2028-08-08",
+      "seam:horizonRecordRef": "horizons-sha256:97121acc513e8b4fa52f40b9f809ddca8a392665daa023376b14c46e04ee771f"
+    }
+  }
+}
