@@ -39,7 +39,7 @@ It is the first Pattern Commons entry where all four layers of the [Seam Stack](
 - The `seam:CrossingRecord` base shape provides a unified, chain-aware schema that all governed-event record types instantiate: gate-check records, lineage records, AI-provenance records, and code-change verification records compose uniformly against a single auditable structure
 - A P13 evidence plane implements multi-party governance record types — `SeamTermAmendmentRecord`, `ObjectionRecord`, `ConsentRecord`, `ResolutionRecord` — all finality-arbiter-free: consent is derived from the record set, not from a coordinator; amendment status is a pure derivation, never stored in any record
 
-## Pattern Commons #8 — Substrate-Crossing Seam (prototype, Phase 0)
+## Pattern Commons #8 — Substrate-Crossing Seam (prototype, Phase 1 complete)
 
 `substrate-crossing/` is a sub-package prototype for Pattern Commons #8:
 the governed crossing from a local-first Automerge/Keyhive substrate into
