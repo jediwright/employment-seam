@@ -3,8 +3,10 @@
 **Instrument:** PC#8 build plan v0.1 §H.3 observation log format
 **Produced:** 2026-08-17 (Phase 0 closing deliverable, per session scope)
 **Feeds:** `pc08-kl1-kl2-closing-evidence_YYYY-MM-DD.md`
-**Status:** ACTIVE — entries appended through Run 3 (2026-08-18). One entry
-block per crossing run; append-only; do not edit prior entries.
+**Status:** ACTIVE — entries appended through Run 5 (2026-08-18); Item 2.2
+note appended. One entry block per crossing run; append-only; do not edit
+prior entries. Entry format extended with the three `phase3_*` fields at
+Phase 3 open (2026-08-29); see `CONVENTIONS.md` §Observation log.
 
 Field definitions are normative per §H.3. Timestamps are ISO 8601 with
 milliseconds, UTC. `null` is written literally where §H.3 permits it.
@@ -27,7 +29,13 @@ relay_ingest_gap_ms: <integer (null if relay_ingested_at is null)>
 intent_without_completion_window_ms: <integer (null if completion immediate)>
 kl1_legibility_observation: <free text; what a deferred party would see>
 kl2_back_pointer_observation: <free text; seamCrossingRef fate>
+phase3_pattern:      <public-subset | delayed-release | aggregated>
+phase3_gate_observation: <free text; what the gate did — pass / block / reason>
+phase3_finding:      <free text; any architectural observation not captured above>
 ```
+
+The three `phase3_*` fields are required from Run 6 onward and optional for
+Runs 1–5; prior entries remain valid without them.
 
 ---
 
@@ -118,8 +126,6 @@ kl2_back_pointer_observation: n/a until Item 1.4 (seamCrossingRef back-pointer);
 
 ---
 
-*Append-only. Canonical copy: operator's machine; `substrate-crossing/docs/` in the employment-seam repo.*
-
 ### Run 4 — Item 1.4 back-pointer-carrying run (baseline)
 
 ```
@@ -172,3 +178,5 @@ run_cids:            Run 2 = bafyreicmlwc3hv42dk3a34lxledd22syjc3zfvu6boqorn2qoh
 note:                CID is content-addressed and stable across PDS retrieve; migration
                      stability deferred.
 ```
+
+*Append-only. Canonical copy: operator's machine; `substrate-crossing/docs/` in the employment-seam repo.*
