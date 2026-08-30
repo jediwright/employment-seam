@@ -256,11 +256,11 @@ describe('Item 1.1 — crossing-intent record', () => {
     // advances past the horizon after the read-confirm step) → intent
     // record present, putRecord NOT fired (crossing-unconfirmed posture)
     let t = Date.parse('2026-08-18T12:00:00.000Z');
-    // Clock advances 3s per observation. Item 3.1 order: gate-started,
-    // gate-pass, assembly-completed, digest-check-pass,
-    // assembly-document-written (5 stamps, t0..t0+12s), then the mint-time
-    // horizon check (t0+15s). Then emittedAt, written, read-confirmed
-    // (t0+18..24s), then the fire-time check (t0+27s).
+    // Clock advances 3s per observation. Item 3.2 order (horizon step 3h
+    // before the assembly write): gate-started, gate-pass,
+    // assembly-completed, digest-check-pass (t0..t0+9s), horizon step's
+    // single read (t0+12s), assembly-document-written (t0+15s), emittedAt,
+    // written, read-confirmed (t0+18..24s), fire-time check (t0+27s).
     // Horizon at t0+16s → alive at mint, expired at fire.
     const horizon = new Date(t + 16_000).toISOString();
     const clock = () => {

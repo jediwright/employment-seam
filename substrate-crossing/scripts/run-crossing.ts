@@ -1,24 +1,34 @@
 /**
  * PC#8 — Operator-run instrumented governed crossing.
- * Phase 1 Items 1.2 + 1.3 + 1.4 (Runs 1–5); Phase 3 Item 3.1 (Run 6+).
+ * Phase 1 Items 1.2 + 1.3 + 1.4 (Runs 1–5); Phase 3 Item 3.1 (Run 6);
+ * Phase 3 Item 3.2 (Run 7).
  *
  * OPERATOR-RUN: requires live network access to bsky.social and Jetstream,
  * which the authoring container does not have (same split as Item 0.2).
  *
  *   cp .env.example .env    # PDS_HANDLE + PDS_APP_PASSWORD (Item 0.2 creds)
  *   npm run run:crossing -- --run 6 --scenario public-subset
+ *   npm run run:crossing -- --run 7 --scenario delayed-release
  *
  * Flags:
  *   --run N           Run number for the H.3 entry (default 1). Check the
  *                     canonical observation log's tail before choosing N.
- *   --scenario S      baseline | failed | public-subset (default baseline).
+ *   --scenario S      baseline | failed | public-subset | delayed-release
+ *                     (default baseline).
  *                     `failed` fires against an invalid collection to force a
  *                     reject — the AC-1.5 simulated-failure posture. NOTE
  *                     (A7 ~): the reject is @atproto/api CLIENT-side NSID
  *                     validation; the request never reaches the PDS.
  *                     `public-subset` is Item 3.1 / Run 6 — three legs in one
- *                     invocation (see below).
+ *                     invocation (see below). `delayed-release` is Item 3.2 /
+ *                     Run 7 — three legs, one granted input (see below).
  *   --horizon-s N     crossingTimeoutHorizon = now + N seconds (default 120).
+ *                     For `delayed-release`: = T1 + N (the window stays open
+ *                     N seconds after the grant horizon).
+ *   --grant-horizon-s N
+ *                     `delayed-release` only: crossingGrantHorizon T1 = now +
+ *                     N seconds (default 90; floor 60 — spec r2 Item 3.2
+ *                     failure mode 2; the runner refuses lower).
  *   --read-wait-ms N  Bounded wait for the actor's repo to obtain each
  *                     granted input (default 15000), inclusive of the
  *                     membership-visible wait (spike D-4). Elapsed →
@@ -56,6 +66,28 @@
  *   precede any intent-record timestamp IN THE RUN; running the blocking
  *   legs first makes that hold across the whole invocation, not only within
  *   a leg. (Ruling R-A, brief v0.1.3 §8, operator-confirmed 2026-08-29.)
+ *
+ * ITEM 3.2 (Run 7) — delayed-release (brief v0.1 §4; D-2, D-7, F-3.2-1):
+ *   One granted input (`timed-release`), uniform path. T1 = now + G is the
+ *   crossingGrantHorizon (not-before), hosted on the INTENT RECORD beside
+ *   crossingTimeoutHorizon (D-2; Keyhive Access has no fields). The seam's
+ *   horizon step (3h) reads the system clock fresh on every attempt and
+ *   blocks before any assembly write. Three legs, in this order:
+ *     before-horizon — attempt at T0 < T1 → horizon-not-reached; assembly
+ *                      document untouched; no intent; no putRecord (AC-3.2.1).
+ *     (wait)         — sleep until wall clock ≥ T1 + 1 s; both clock reads
+ *                      logged (spec r2 FM2: wall clock confirmed).
+ *     after-horizon  — same request → fires; intent carries BOTH horizons;
+ *                      completion minted (AC-3.2.2, AC-3.2.3).
+ *     replay         — immediately after the pass, a FRESH T1' = now + G on
+ *                      the same input → horizon-not-reached: the pass was
+ *                      not cached (spec r2 adversarial step). This leg's
+ *                      block timestamp follows the positive intent BY
+ *                      DESIGN; AC-3.2.1's ordering clause is read against
+ *                      the before-horizon leg (operator ruling, 2026-08-30).
+ *   KL-12: observation only. Run 7 shows a lower-bound gate on the seam's
+ *   record; it does NOT exercise grant-authority lapse (the read grant
+ *   persists across all legs — the seam, not the grant, refuses).
  *
  * TRANSPORT (D-6 r1; Item 3.1b spike, SL-0186): Run 6 runs on the ENCRYPTED
  *   transport — `initializeAutomergeRepoKeyhive` (subduction), two hives
@@ -145,10 +177,12 @@ function flag(name: string, fallback: string): string {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 
-type Scenario = 'baseline' | 'failed' | 'public-subset';
+type Scenario = 'baseline' | 'failed' | 'public-subset' | 'delayed-release';
 const RUN_N = Number(flag('run', '1'));
 const SCENARIO = flag('scenario', 'baseline') as Scenario;
 const HORIZON_S = Number(flag('horizon-s', '120'));
+const GRANT_HORIZON_S = Number(flag('grant-horizon-s', '90'));
+const GRANT_HORIZON_FLOOR_S = 60;
 const READ_WAIT_MS = Number(flag('read-wait-ms', '15000'));
 const UNGRANTED_PROBE_MS = Number(flag('ungranted-probe-ms', '6000'));
 
@@ -156,6 +190,13 @@ const ACK =
   'I acknowledge that this crossing terminates seam-stack enforcement at the AT Protocol boundary; recall is a propagated request. (Operator-authored; Item 3.1 uniform-assembly-path run.)';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Item 3.2: wall-clock wait until `iso` (+ `slackMs`); returns both clock reads. */
+async function sleepUntil(iso: string, slackMs: number): Promise<{ before: string; after: string }> {
+  const before = new Date().toISOString();
+  const until = Date.parse(iso) + slackMs;
+  while (Date.now() < until) await sleep(Math.min(1_000, Math.max(50, until - Date.now())));
+  return { before, after: new Date().toISOString() };
+}
 
 // ---------------------------------------------------------------------------
 // Keyhive fixture helpers
@@ -452,9 +493,9 @@ function fmtLog(log: CrossingLogEntry[]): string[] {
 /** phase3_* fields: required from Run 6 (buildH3Entry enforces); for earlier
  *  run numbers on baseline/failed they are omitted → n/a. */
 function phase3Fields(scenario: Scenario, gateObs: string[], findings: string[]): H3Phase3Fields | undefined {
-  if (RUN_N < 6 && scenario !== 'public-subset') return undefined;
+  if (RUN_N < 6 && scenario !== 'public-subset' && scenario !== 'delayed-release') return undefined;
   return {
-    pattern: 'public-subset',
+    pattern: scenario === 'delayed-release' ? 'delayed-release' : 'public-subset',
     gateObservation: gateObs.join(' | '),
     finding: findings.join(' | '),
   };
@@ -482,7 +523,9 @@ async function emitEntry(p: {
   });
   const label = p.scenario === 'public-subset'
     ? 'Item 3.1 public-subset crossing (negative → adversarial → positive)'
-    : `Item 3.1 uniform-assembly-path run (${p.scenario})`;
+    : p.scenario === 'delayed-release'
+      ? 'Item 3.2 delayed-release crossing (before-horizon → after-horizon → replay)'
+      : `Item 3.1 uniform-assembly-path run (${p.scenario})`;
   console.log('\n' + renderH3Entry(entry, label));
   const outPath = writeH3EntryFile(entry, { runLabel: label });
   console.log(`${TAG} H.3 entry written to ${outPath}`);
@@ -502,8 +545,12 @@ async function main() {
     console.error(`${TAG} --run must be a positive integer`);
     process.exit(1);
   }
-  if (!['baseline', 'failed', 'public-subset'].includes(SCENARIO)) {
-    console.error(`${TAG} --scenario must be baseline | failed | public-subset`);
+  if (!['baseline', 'failed', 'public-subset', 'delayed-release'].includes(SCENARIO)) {
+    console.error(`${TAG} --scenario must be baseline | failed | public-subset | delayed-release`);
+    process.exit(1);
+  }
+  if (SCENARIO === 'delayed-release' && (!Number.isFinite(GRANT_HORIZON_S) || GRANT_HORIZON_S < GRANT_HORIZON_FLOOR_S)) {
+    console.error(`${TAG} --grant-horizon-s must be ≥ ${GRANT_HORIZON_FLOOR_S} for delayed-release (spec r2 Item 3.2 FM2); got ${GRANT_HORIZON_S}`);
     process.exit(1);
   }
 
@@ -554,9 +601,10 @@ async function main() {
       console.log(`${TAG} issuer accessForDoc(actor, ${n}) = ${a ? a.toString() : 'undefined'}  ${h.url}`);
     }
   } else {
-    sectionA = await (author.repo as any).create2(mkSection('single-source', true));
+    const name = SCENARIO === 'delayed-release' ? 'timed-release' : 'single-source';
+    sectionA = await (author.repo as any).create2(mkSection(name, true));
     await grantWithPoll(author, sectionA.url, actorCard, Access.read());
-    console.log(`${TAG} single input granted read: ${sectionA.url}`);
+    console.log(`${TAG} single input granted read (${name}): ${sectionA.url}`);
   }
 
   // --- 2. Actor-side reads of the granted inputs (bounded; no fallback) ---
@@ -647,6 +695,52 @@ async function main() {
     throw new Error('putRecord must not be called on a blocked leg');
   };
 
+  // Item 3.2: T1 (crossingGrantHorizon) and the timeout horizon (T1 + HORIZON_S)
+  // are fixed once here, at fixture time, and printed. Undefined otherwise.
+  let grantHorizon: string | undefined;
+  let delayedTimeoutHorizon: string | undefined;
+  if (SCENARIO === 'delayed-release') {
+    const t1 = Date.now() + GRANT_HORIZON_S * 1000;
+    grantHorizon = new Date(t1).toISOString();
+    delayedTimeoutHorizon = new Date(t1 + HORIZON_S * 1000).toISOString();
+    console.log(`${TAG} Item 3.2 horizons: crossingGrantHorizon T1=${grantHorizon} (now + ${GRANT_HORIZON_S}s); crossingTimeoutHorizon=${delayedTimeoutHorizon} (T1 + ${HORIZON_S}s); now=${new Date().toISOString()}`);
+  }
+
+  // --- 4d. delayed-release: BEFORE-HORIZON leg (negative; AC-3.2.1) then the wait ---
+  if (SCENARIO === 'delayed-release') {
+    const asmPre = await makeAssemblyDoc(actor, author, 'before-horizon leg');
+    findings.push(`Assembly document creator access (before-horizon leg): accessForDoc(self)=${asmPre.creatorAccess}; members: ${asmPre.membership}.`);
+    const log: CrossingLogEntry[] = [];
+    const attemptAt = new Date().toISOString();
+    const outcome = await initiateCrossing({
+      inputs: grantedInputs,
+      handle: asmPre.handle,
+      presentedContent: presented,
+      gateCheck: gate,
+      putRecord: neverFire,
+      identity,
+      targetPDS: PDS_SERVICE,
+      regimeAcknowledgment: ACK,
+      crossingTimeoutHorizon: delayedTimeoutHorizon!,
+      crossingGrantHorizon: grantHorizon!,
+      log,
+    });
+    allLogs.push({ leg: 'before-horizon', log });
+    const asmDoc = (await asmPre.handle.doc()) as CompletionDocShape;
+    const untouched = assemblyDocIsUntouched(asmDoc);
+    const blockedAt = log.find((l) => l.event === 'grant-horizon-not-reached');
+    const obs = `BEFORE-HORIZON leg: attempt at ${attemptAt} with crossingGrantHorizon=${grantHorizon} → ${outcome.status}${outcome.status === 'horizon-not-reached' ? ` (horizon step 3h, fresh clock read; ${outcome.reason})` : ' (UNEXPECTED)'}; block logged ${blockedAt?.at ?? 'n/a'}; assembly document untouched=${untouched}; intent records=${(asmDoc.crossingRecords ?? []).length}; putRecord not called.`;
+    console.log(`${TAG} ${obs}`);
+    gateObservations.push(obs);
+    if (outcome.status !== 'horizon-not-reached' || !untouched) {
+      findings.push('BEFORE-HORIZON leg did not block as horizon-not-reached with nothing written — AC-3.2.1 not met; investigate before closing Item 3.2.');
+    }
+    const waited = await sleepUntil(grantHorizon!, 1_000);
+    const wobs = `Wait: wall clock before sleep ${waited.before}; after sleep ${waited.after}; T1=${grantHorizon} (spec r2 FM2 — real wall clock at both crossings, no injected clock).`;
+    console.log(`${TAG} ${wobs}`);
+    gateObservations.push(wobs);
+  }
+
   // --- 4a. public-subset: NEGATIVE leg (access-layer block on section_c) ---
   if (SCENARIO === 'public-subset') {
     const asmNeg = await makeAssemblyDoc(actor, author, 'negative leg');
@@ -717,7 +811,7 @@ async function main() {
   }
 
   // --- 5. POSITIVE leg (all scenarios): the governed crossing ---
-  const legLabel = SCENARIO === 'public-subset' ? 'positive leg' : SCENARIO;
+  const legLabel = SCENARIO === 'public-subset' ? 'positive leg' : SCENARIO === 'delayed-release' ? 'after-horizon leg' : SCENARIO;
   const asm = await makeAssemblyDoc(actor, author, legLabel);
   findings.push(`Assembly document creator access (${legLabel}): accessForDoc(self)=${asm.creatorAccess}; members: ${asm.membership}.`);
   const record: WhtwndEntryRecord = {
@@ -746,7 +840,7 @@ async function main() {
     attachSeamCrossingRef: true,
   });
 
-  const horizon = horizonFor();
+  const horizon = delayedTimeoutHorizon ?? horizonFor();
   const log: CrossingLogEntry[] = [];
   const hook = createCompletionHook();
 
@@ -765,6 +859,7 @@ async function main() {
       targetPDS: PDS_SERVICE,
       regimeAcknowledgment: ACK,
       crossingTimeoutHorizon: horizon,
+      ...(grantHorizon !== undefined ? { crossingGrantHorizon: grantHorizon } : {}),
       log,
     });
     outcomeStatus = outcome.status;
@@ -772,6 +867,10 @@ async function main() {
       intentEmittedAt = outcome.intent.emittedAt;
       firedIntent = outcome.intent;
       console.log(`${TAG} fired: uri=${outcome.put.uri} cid=${outcome.put.cid}`);
+      if (SCENARIO === 'delayed-release') {
+        // AC-3.2.3: both horizons on the intent record (same host object).
+        console.log(`${TAG} intent horizons: crossingGrantHorizon=${outcome.intent.crossingGrantHorizon} crossingTimeoutHorizon=${outcome.intent.crossingTimeoutHorizon} emittedAt=${outcome.intent.emittedAt}`);
+      }
       console.log(`${TAG} intent sourceDocumentURI=${outcome.intent.sourceDocumentURI} (assembly document); sourceLineage=${outcome.intent.sourceLineage.map((l) => l.documentURI).join(', ')}; grantReference=${outcome.intent.grantReference}`);
       // Spike D-6 / operator (S6 Unit B): the nudge commit is part of the
       // heads named by sourceDocumentCID (author holds read on the assembly
@@ -794,10 +893,45 @@ async function main() {
     intentEmittedAt = (doc.crossingRecords ?? []).at(-1)?.emittedAt ?? null;
     console.error(`${TAG} publish failed (crossing-intent-failed posture): ${fireError}`);
   }
-  allLogs.push({ leg: 'positive', log });
+  allLogs.push({ leg: SCENARIO === 'delayed-release' ? 'after-horizon' : 'positive', log });
   gateObservations.push(
-    `POSITIVE leg: presented ${grantedInputs.length} granted input(s) → gate passed on isReader for each (issuer's hive) → assembled → digest matched → assembly document written → ${outcomeStatus}.`,
+    SCENARIO === 'delayed-release'
+      ? `AFTER-HORIZON leg: attempt at ${new Date().toISOString()} with crossingGrantHorizon=${grantHorizon} (T1 passed) → gate passed on isReader (issuer's hive) → assembled → digest matched → horizon step passed (fresh clock read) → assembly document written → ${outcomeStatus}; intent carries crossingGrantHorizon=${firedIntent?.crossingGrantHorizon ?? 'n/a'} and crossingTimeoutHorizon=${firedIntent?.crossingTimeoutHorizon ?? 'n/a'} (AC-3.2.3).`
+      : `POSITIVE leg: presented ${grantedInputs.length} granted input(s) → gate passed on isReader for each (issuer's hive) → assembled → digest matched → assembly document written → ${outcomeStatus}.`,
   );
+
+  // --- 5r. delayed-release: REPLAY leg (adversarial; spec r2 Item 3.2 step) ---
+  // Immediately after the pass: a FRESH future T1' on the same input must block.
+  // Block timestamp follows the positive intent by design (operator ruling).
+  if (SCENARIO === 'delayed-release') {
+    const t1r = new Date(Date.now() + GRANT_HORIZON_S * 1000).toISOString();
+    const asmRe = await makeAssemblyDoc(actor, author, 'replay leg');
+    const rlog: CrossingLogEntry[] = [];
+    const attemptAt = new Date().toISOString();
+    const re = await initiateCrossing({
+      inputs: grantedInputs,
+      handle: asmRe.handle,
+      presentedContent: presented,
+      gateCheck: gate,
+      putRecord: neverFire,
+      identity,
+      targetPDS: PDS_SERVICE,
+      regimeAcknowledgment: ACK,
+      crossingTimeoutHorizon: new Date(Date.parse(t1r) + HORIZON_S * 1000).toISOString(),
+      crossingGrantHorizon: t1r,
+      log: rlog,
+    });
+    allLogs.push({ leg: 'replay', log: rlog });
+    const reDoc = (await asmRe.handle.doc()) as CompletionDocShape;
+    const reUntouched = assemblyDocIsUntouched(reDoc);
+    const robs = `REPLAY leg (adversarial, post-pass by design): attempt at ${attemptAt} with a fresh crossingGrantHorizon=${t1r} set after the pass → ${re.status}${re.status === 'horizon-not-reached' ? ' — the pass was not cached; fresh clock read each attempt' : ' (UNEXPECTED)'}; assembly document untouched=${reUntouched}; no intent; putRecord not called. Its block timestamp follows the after-horizon intent; AC-3.2.1's ordering clause is the before-horizon leg's.`;
+    console.log(`${TAG} ${robs}`);
+    gateObservations.push(robs);
+    if (re.status !== 'horizon-not-reached' || !reUntouched) {
+      findings.push('REPLAY leg did not block on the fresh horizon — cached-decision suspicion; investigate before closing Item 3.2.');
+    }
+    findings.push('F-3.2-1: at 6479fc7 the timeout check ran after the assembly write; from this diff both horizon checks run in one step (3h) before any write — no assembly content on any horizon block at mint. KL-12: observation only — lower-bound gate on the intent record shown; grant-authority lapse NOT exercised (read grant persisted across all legs; the seam refused, not the grant); recallSemantics staleness n/a (no external protocol change); mid-horizon drift n/a on this stack. F-3.2-2 (AC-3.2.5): term says "grant", host is the intent record; distinction from crossingTimeoutHorizon is semantic (earliest-authorized vs latest-before-unconfirmed); name-follows-host queued to the KL-12 evidence session.');
+  }
 
   // --- 6. Relay observation (success path) ---
   let relayIngestedAt: string | null = null;

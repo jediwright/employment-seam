@@ -1,8 +1,8 @@
 # substrate-crossing conventions
 
-**Version:** v0.2
+**Version:** v0.3
 **Date:** 2026-08-30
-**Supersedes:** v0.1 (2026-08-29, at `b075038`)
+**Supersedes:** v0.2 (2026-08-30, at `6479fc7`)
 **Read first.** Every session that touches `substrate-crossing/` reads this
 file before reading code. Conventions land here at the session that
 establishes them, never later. Where a line describes something decided but
@@ -14,25 +14,34 @@ Sources of truth as of this version: `src/crossing-intent.ts`,
 `src/canonical-json.ts`, `src/assembly.ts`, `src/seam-crossing-ref.ts`,
 `src/observation-log.ts`, `scripts/run-crossing.ts`,
 `test/item-3-1-public-subset.test.ts`,
+`test/item-3-2-delayed-release.test.ts`,
 `test/spike/spike-3-1b-encrypted-transport.test.ts`,
 `docs/observation-log-pc08.md`.
 
-**What changed v0.1 → v0.2.** Run 6 (Item 3.1, public-subset crossing) ran
-on 2026-08-29 local / 2026-08-30 UTC on the encrypted transport and the
-operator confirmed AC-3.1.1–3.1.5. Everything v0.1 marked *decided, not
-implemented* under D-1, D-3, D-4, D-5 is now as-implemented and is described
-here as shipped. D-2 (`crossingGrantHorizon`) remains decided, not
-implemented — Item 3.2. D-6 r1 (transport scope of D-1) is in force. New
-sections: transport, the assembly rule, multi-input `grantReference`, leg
-order, the un-granted probe, storage-scan decoding, observation-log
-paste hygiene, the AppView observability note, and the CLI pathspec rule.
+**What changed v0.2 → v0.3.** Run 7 (Item 3.2, delayed-release crossing) ran
+on 2026-08-30 on the encrypted transport and the operator confirmed
+AC-3.2.1–3.2.6 plus the spec-r2 adversarial (replay) step. D-2
+(`crossingGrantHorizon`) is now **as-implemented**: an optional not-before
+horizon on the intent record, checked in a single horizon step (3h) together
+with the timeout check, **before** the assembly-document write — the timeout
+check moved from after the write (F-3.2-1; the v0.2 §Records line "an
+expired or unmet horizon at mint produces no assembly document write" was
+stale against the code at `6479fc7` and is true by construction from the
+Item 3.2 diff). D-7 (horizon consistency: `grant ≥ timeout` →
+`horizon-inconsistent`, refused explicitly) lands as text in §Gate and
+§Records. New in this version: the delayed-release scenario and leg order
+(replay leg post-pass by design), the optional-field rules for
+`crossingGrantHorizon`, the Run 7 evidence target, the relay-watcher watch
+item (F-3.2-5), and the AppView pre-embargo-timestamp legibility note.
+KL-12 remains observation-only; nothing here is lexicon evidence.
 
 ---
 
 ## Records
 
 **crossing-intent** (`src/crossing-intent.ts`, `CrossingIntentRecord`).
-Twenty-two fields, all required, none nullable or empty:
+Twenty-two required fields, none nullable or empty, plus one optional field
+(`crossingGrantHorizon`, below). Required:
 `recordType='crossing-intent'`, `governanceEvent='substrate-crossing'`,
 `boundType='exposure-unbounded'`, `grantorDID`, `targetDID`,
 `identityCustodyClass` (`self-custodied | mixed-custody | provider-custodied`),
@@ -71,8 +80,27 @@ invalid record is never written (the seam throws).
 - Intent records live in the assembly document's `crossingRecords` array
   and are identified by `emittedAt` for read-back confirmation. Input
   documents receive no crossing records.
-- **Decided, not implemented (D-2):** `crossingGrantHorizon` (ISO) joins this
-  record as an optional not-before horizon. Item 3.2. See Gate.
+- **`crossingGrantHorizon` (D-2) — as implemented, Run 7.** Optional
+  not-before (earliest-authorized) horizon, ISO, hosted on the intent record
+  beside `crossingTimeoutHorizon` — seam-level, not grant-level (Keyhive
+  `Access` carries no fields). The distinction between the two horizons is
+  semantic — earliest-authorized versus latest-before-unconfirmed — not
+  host-object. Optional-field rules:
+  - **Omitted, never null.** A request with no not-before horizon omits the
+    key entirely; the minted record never carries the key as `undefined`,
+    `null`, or `''`. `validateCrossingIntentRecord()` accepts an absent key,
+    and rejects a present key that is null, empty, or not a parseable ISO
+    timestamp.
+  - **Canonical-JSON binding unchanged for Runs 1–6.** `canonicalJson()`
+    drops `undefined` members and an omitted key contributes nothing, so
+    the `crossingIntentRef` of every record minted without the field —
+    all of Runs 1–6 — is byte-identical before and after this version.
+    Nothing is retrofitted.
+  - The term "grant" in the field name against the intent-record host is a
+    lexicon question (F-3.2-2, AC-3.2.5), queued to the KL-12 evidence
+    session; the field itself is an implementation decision, not lexicon
+    evidence. Lexicon v2.4's KL-12 "home object: the grant" is contra D-2
+    as implemented (F-3.2-3) — a v2.5 input.
 
 **crossing-completion** (`src/crossing-completion.ts`,
 `CrossingCompletionRecord`). Eleven fields; `relayIngestedAt` is the only
@@ -106,8 +134,13 @@ Jetstream commit payload, dropped at WhiteWind AppView render as an unknown
 field.
 
 **A blocked gate never mints a record — or an assembly document.** A blocked
-access check, a digest mismatch, or an expired or unmet horizon at mint,
-produces no assembly document write and no intent record. A failed or
+access check, a digest mismatch, or any horizon block at mint
+(`horizon-not-reached`, `horizon-inconsistent`, `horizon-expired`) produces
+no assembly document write and no intent record. From this version the
+horizon half of that sentence is true **by construction**: both horizon
+checks run in one step (3h) before the assembly write (F-3.2-1 — at
+`6479fc7` the timeout check ran after the write; Run 6 never exercised that
+path, so no Run 6 evidence is affected). A failed or
 unaccepted publish produces no completion record; the intent stays
 document-resident and the assembly document reads
 `crossing-intent-pending` → `crossing-unconfirmed` at horizon elapse
@@ -196,7 +229,8 @@ seam rules, not AppView behaviour.
 
 ## Gate
 
-Order as implemented (`initiateCrossing()`, Run 6):
+Order as implemented (`initiateCrossing()`, Runs 6–7; step 3h and the
+retirement of the old step 5 are the Item 3.2 diff — F-3.2-1):
 
 1. **Access check, per input document, on the issuer's hive** (ruling 2 —
    stands, S5 §7.1; the actor's hive also sees its grants on the encrypted
@@ -212,26 +246,48 @@ Order as implemented (`initiateCrossing()`, Run 6):
    Assembly).
 3. **Digest check** — hash equality of presented vs assembled (see Digest).
    Mismatch → stop; nothing written.
+3h. **Horizon step** (Item 3.2; D-2, D-7, F-3.2-1). One fresh clock read
+   for both horizons, evaluated on every attempt, never cached, nothing
+   written on any block, nothing retained between attempts. In order:
+   - a. `crossingGrantHorizon` present but null, empty, or unparseable →
+     **seam fault** (thrown), not a gate block — omit the key for no
+     not-before horizon.
+   - b. `crossingGrantHorizon ≥ crossingTimeoutHorizon` →
+     `horizon-inconsistent` (D-7): the request can never mint — by the time
+     it is authorized it is already expired — so it is refused explicitly
+     at the first attempt, both values logged verbatim, nothing written.
+     The seam never clamps or reorders a request's horizons. Runs only
+     when a grant horizon is present; horizon-less requests are unaffected.
+   - c. `now < crossingGrantHorizon` → `horizon-not-reached` (D-2): not
+     yet authorized; no assembly write, no intent record.
+   - d. `now ≥ crossingTimeoutHorizon` → `horizon-expired` (KL-8a): a
+     record born expired would be born dead. Moved here from after the
+     assembly write (F-3.2-1).
 4. **Write the assembled output to the assembly document** (D-5); recompute
    the digest over the written content object and require equality with
    step 3 (seam fault on inequality).
-5. `crossingTimeoutHorizon` must be in the future at mint. Expired → stop,
-   no record (a record born expired would be born dead).
+5. *(retired into 3h.d — Item 3.2 / F-3.2-1.)*
 6. Mint the intent into the assembly document's `crossingRecords`;
    validate; write; read back and confirm presence (not found → throw).
+   `crossingGrantHorizon` is carried when present (key omitted otherwise).
 7. Re-check `crossingTimeoutHorizon` at fire. Expired → do not fire; intent
-   remains; document reads `crossing-unconfirmed` at elapse.
+   remains; document reads `crossing-unconfirmed` at elapse. (The grant
+   horizon is not re-checked at fire: it was satisfied at mint and time
+   moves forward.)
 8. Fire `putRecord(intent)`.
 9. On accepted publish, write the completion (separate call, same
    discipline: guard → mint → write → hook → read-back).
 
 Every step stamps an ordered `CrossingLogEntry`; log order is the evidence
 of write-before-fire and of block-before-any-intent. Timestamps are ISO 8601
-with milliseconds, UTC. Run 6 events in order: `gate-check-started`,
+with milliseconds, UTC. Events in order: `gate-check-started`,
 `gate-check-pass` (per input) / `gate-check-blocked`, `assembly-completed`,
-`digest-check-pass` / `digest-check-blocked`, `assembly-document-written`,
-`intent-record-written`, `intent-record-read-confirmed`, `put-record-fired`,
-`put-record-accepted`, `completion-record-written`.
+`digest-check-pass` / `digest-check-blocked`, then the horizon step's
+blocks — `grant-horizon-not-reached`, `horizon-inconsistent`,
+`timeout-horizon-expired` (all three precede any assembly write from this
+version) — then `assembly-document-written`, `intent-record-written`,
+`intent-record-read-confirmed`, `put-record-fired`, `put-record-accepted`,
+`completion-record-written`.
 
 **Grant boundary (D-1) — as implemented.** The grant boundary equals the
 publish boundary. No principal other than the author holds read on a
@@ -267,6 +323,42 @@ timestamp logged before any intent-record timestamp" hold across the whole
 invocation, not only within a leg. Run 6: block logged 01:27:52.297Z; first
 intent 01:27:52.317Z.
 
+**Delayed-release leg order (Item 3.2 ruling, operator-confirmed
+2026-08-30).** The `delayed-release` scenario runs three legs with the
+adversarial leg **after** the positive one — before-horizon → (wait) →
+after-horizon → replay — because a cache test is meaningless before a pass.
+The replay leg sets a fresh future `crossingGrantHorizon` immediately after
+the pass on the same input; a block proves the pass was not cached and the
+clock is read fresh on every attempt. Its block timestamp follows the
+positive intent **by design**; AC-3.2.1's ordering clause is read against
+the before-horizon leg only. The wait leg logs the wall clock before and
+after the sleep (spec r2 FM2 — real wall clock at both crossings, no
+injected clock). Run 7: before-horizon blocked 17:45:09.739Z against
+T1=17:46:39.734Z (untouched=true, 0 intents, no `putRecord`); wait
+17:45:09.739 → 17:46:40.735; after-horizon intent 17:46:40.764Z carrying
+both horizons; replay blocked 17:46:41.162Z against fresh
+T1′=17:48:11.145Z.
+
+**Not-before horizon (D-2) — as implemented, Run 7.** When
+`crossingGrantHorizon` is present on the crossing request, the gate blocks
+any attempt before it, at mint, with no record minted and no assembly
+write. Checked from the system clock, evaluated fresh on every attempt,
+never cached. Both horizons ride the intent record; they differ in meaning,
+not in host object (see Records). **KL-12 scope, recorded not claimed:**
+Run 7 shows a lower-bound gate on the seam's record only. Grant-authority
+lapse was NOT exercised — the read grant persisted across all three legs;
+the seam, not the grant, refused. `recallSemantics` staleness n/a (no
+external protocol change); mid-horizon drift n/a (the grant carries no
+horizon on this stack). KL-12 stays PROPOSED, observation-only.
+
+**Horizon consistency (D-7) — as implemented, Run 7 diff.** A request
+whose `crossingGrantHorizon` is at or after its `crossingTimeoutHorizon`
+can never mint and is refused explicitly at the horizon step
+(`horizon-inconsistent`, both values logged verbatim, nothing written) —
+not clamped, not reordered, not rejected outside the seam. The seam is the
+only place the two fields meet. Unit-tested (equal; later) in
+`test/item-3-2-delayed-release.test.ts`.
+
 **Negative-leg presentation.** The negative leg presents the un-granted
 document to the gate **by ID, unconditionally**, after the bounded
 un-granted probe (`probeUngranted()`, see Environment) has recorded its
@@ -276,14 +368,7 @@ runner is the reference.
 
 **Decided, not implemented:**
 
-- **Not-before horizon (D-2).** When `crossingGrantHorizon` is present on the
-  crossing request, the gate blocks any attempt before it, at mint, with no
-  record minted. Checked from the system clock, evaluated fresh on every
-  attempt, never cached. `crossingGrantHorizon` (earliest authorized) and
-  `crossingTimeoutHorizon` (latest, after which an unconfirmed crossing
-  hardens) are both carried on the intent record; they differ in meaning,
-  not in host object. Item 3.2 (KL-12 observation).
-- **Fire-time payload re-verification (TOCTOU).** Item 3.3.
+- **Fire-time payload re-verification (TOCTOU).** Item 3.3 (Run 8).
 
 Every gate decision is re-evaluated on every attempt. A prior pass, block,
 or mismatch carries no state into the next attempt.
@@ -327,15 +412,21 @@ phase3_finding:      <free text; any architectural observation not captured abov
   `substrate-crossing/test/spike/spike-3-1b-encrypted-transport.test.ts`).
 - Scenario vocabulary is closed: the five values above plus `chained-pc9-pc8`
   if the chained supplemental run is taken. The runner's `--scenario` flag
-  accepts the subset it can run (`baseline | failed | public-subset` at this
-  version).
+  accepts the subset it can run (`baseline | failed | public-subset |
+  delayed-release` at this version; F-3.2-4 — `H3Scenario` already carried
+  the value, the flag was widened in the Item 3.2 diff).
 - Run numbering: Run 0 is the connectivity probe and is excluded from
   acceptance-criteria counts. Check the log's tail before choosing `--run N`.
 - `null` means applicable but unobserved. `n/a` means structurally
   inapplicable. They are not interchangeable.
 - For a blocked attempt, the block event and its timestamp are logged before
   any intent-record timestamp; a block that appears after an intent
-  timestamp is a discipline violation, not a passing negative case.
+  timestamp is a discipline violation, not a passing negative case — with
+  one designed exception: an adversarial leg the scenario places **after**
+  the positive leg (the delayed-release replay leg) blocks post-intent by
+  design and is named as such in the entry; the ordering clause is
+  evaluated against the scenario's blocking leg only (Item 3.2 ruling) and
+  does not apply to it.
 
 **Paste hygiene (Finding 8).** When pasting a runner-emitted block into the
 canonical log:
@@ -365,7 +456,12 @@ published under the Phase 2/3 test account `localboundary.bsky.social`
 primary handle; nothing has been published under the primary handle. Run 2
 (`3mteosxkzms27`), Run 4 (`3mtevg2odx424`), Run 5 (`3mtf65fcgvf2s`), Run 6
 (`3mubag4iqdp2q`, CID
-`bafyreigiaiypsj3vwgss4yh3arthyqofoxndhwoni7ps74ja5lazlw5gty`). The Run 5
+`bafyreigiaiypsj3vwgss4yh3arthyqofoxndhwoni7ps74ja5lazlw5gty`), Run 7
+(`3mucx4edq542p`, CID
+`bafyreib7wtjclkjuu6bbzyumwyp3puwsm2ihdli7w2ja3qbif2swgjmhyy`).
+`check:pds` probe records (Item 0.2 shape, most recently `3mucwyu2eye2l`)
+are not evidence targets and may be cleaned at the operator's option;
+governed-crossing records are never deleted. The Run 5
 record carries the title "Run 1" on WhiteWind — fixture-title reuse, not
 misattribution; the PDS is left alone. Records published by governed
 crossings are retained as evidence, never deleted, never retrofitted.
@@ -452,7 +548,15 @@ runner default (`DEFAULT_JETSTREAM`); overridable by `JETSTREAM_ENDPOINT`.
 `wantedCollections` server-side filtering does not deliver
 `com.whtwnd.blog.entry` commits; subscriptions are unfiltered with
 client-side DID + collection matching, opened before the publish fires.
-Run 6 relay ingest gap: 15.9 s.
+Run 6 relay ingest gap: 15.9 s. **Watch (F-3.2-5):** Run 7
+`relay_ingested_at` = null (applicable, unobserved) — the watcher opened
+before the ~92 s embargo wait and idled across it; Runs 1–6 fired within
+seconds of open; `check:pds` ingested 179 ms three minutes earlier; KL-2
+unaffected (`getRecord()` intact). Queued runner fix: open the watcher
+after the wait. Not re-run. **F-3.2-6 (cosmetic, queued with F-3.2-5):**
+the runner's AFTER-HORIZON gate observation stamps its "attempt at" time
+post-leg; the crossing log (`gate-check-started`) is authoritative for
+attempt timing.
 
 **Keyhive capabilities** are document-granular. `Access` is a four-level
 total order — relay (0), read (1), edit (2), admin (3) — with `isReader`,
@@ -464,14 +568,26 @@ first-input title and the content `createdAt` as the displayed date, drops
 `seamCrossingRef` as an unknown field, and shows no trace of the un-granted
 section. The AppView is a rendering of the PDS record, not evidence about
 the seam; observations of it are recorded in the operator-notes section,
-never in the machine block.
+never in the machine block. **Delayed-release legibility (Run 7,
+KL-1-adjacent):** because the displayed date is the content `createdAt`,
+a delayed-release publish shows a **pre-embargo** timestamp on the surface
+(Run 7: displayed 17:45:07Z, before T1; published 17:46:41Z, after T1).
+Horizon-gating is legible only from the intent record — both horizons plus
+`emittedAt > T1` — not from the AppView surface. A seam rule meeting an
+AppView rendering choice; recorded, not a defect.
 
 **Runs** are operator-executed against live network; the authoring
 environment has no network access to the PDS or relay. Scripts:
 `check:pds`, `run:crossing`, `verify:firehose`, `verify:cid`,
 `baseline:0-3`, `test`. The spike suite runs under `vitest.spike.config.ts`
 and is excluded from `tsc` via `tsconfig.json` `exclude: ["test/spike/**"]`
-(Finding 7).
+(Finding 7). `test/item-3-2-delayed-release.test.ts` runs in the default
+glob, not the spike config (Item 3.2 ruling f). Delayed-release runner
+flags: `--scenario delayed-release`; `--grant-horizon-s N` sets
+T1 = now + N (default 90, **floor 60** — spec r2 Item 3.2 failure mode 2;
+the runner refuses lower); `--horizon-s N` becomes T1 + N for this scenario
+(the window stays open N seconds after the grant horizon). Both horizons
+are fixed once at fixture time and printed.
 
 **CLI pathspec rule (Finding 1, I-1).** Every staging, add, or restore
 command in a session paste block uses **absolute paths** from the repository
@@ -487,16 +603,18 @@ the file on disk, stated by the operator.
 
 ## Decisions in force
 
-Reference commit for "as implemented" statements above: **the Phase 3
+Reference commit for "as implemented" statements above: **the Item 3.2
 reference commit** — the single commit that lands this file together with
-the Run 6 files, the S7 runner diff, `tsconfig.json`, the Run 6 entry and the
-post-fix observation log on `main`. Its SHA is recorded in manifest r3 and
-in the SL-0184 closing delta; until then `b075038` remains the audit pin.
+the Item 3.2 diff (`run-crossing.ts`, `crossing-intent.ts`, the two test
+files), the Run 7 entry and the post-notes observation log on `main`. Its
+SHA is recorded in manifest r4 and in the SL-0188 delta; until then
+`6479fc7` (the Item 3.1 reference commit) remains the pin.
 
 | Decision | File | One line |
 |---|---|---|
 | D-1 grant scoping | `D-1_grant-scoping_2026-08-28-r2.md` | Per-section documents; the crossing actor holds read only on documents whose whole content is authorized to cross; the seam binds the assembled output by digest. Grant boundary = publish boundary. **As implemented, Run 6.** |
-| D-2 grant-horizon placement | `D-2_grant-horizon-placement_2026-08-28.md` | `crossingGrantHorizon` lives on the intent record beside `crossingTimeoutHorizon` as a not-before horizon. **Decided, not implemented — Item 3.2.** |
+| D-2 grant-horizon placement | `D-2_grant-horizon-placement_2026-08-28.md` | `crossingGrantHorizon` lives on the intent record beside `crossingTimeoutHorizon` as a not-before horizon; seam-level, not grant-level; fresh clock read at mint; pre-horizon attempt mints nothing. **As implemented, Run 7.** |
+| D-7 horizon consistency | `D-7_horizon-consistency-rule_2026-08-30.md` | `crossingGrantHorizon ≥ crossingTimeoutHorizon` → `horizon-inconsistent`, refused explicitly at the horizon step, nothing written; never clamped or reordered. **As implemented, Run 7 diff (unit-tested).** |
 | D-3 aggregation digest boundary | `D-3_aggregation-digest-boundary_2026-08-28.md` | Digest binds the aggregate output; aggregation is deterministic; input digests are lineage, not binding. D-3's "Run 8" scheduling of the singular-source question is superseded by D-1 r2 / D-5 (spec r2 pointer fix queued). **As implemented, Run 6.** |
 | D-4 gate access level | `D-4_gate-access-level_2026-08-28.md` | Gate checks `isReader`, not presence; `grantReference` names the level held. **As implemented, Run 6.** |
 | D-5 multi-source representation | `D-5_multi-source-representation-and-SL0184-disposition_2026-08-29.md` | Assembled output is written to an assembly document, the single source; inputs carried as `sourceLineage`; crossing records hosted on the assembly document. **As implemented, Run 6 (validation event fired).** |
@@ -505,8 +623,14 @@ in the SL-0184 closing delta; until then `b075038` remains the audit pin.
 Rulings carried as text in this version: S4 rulings 1–5 (actor-side input
 reads, no fallback; gate on the issuer's hive; assembly rule; presented
 content on `initiateCrossing()`; digest by hash equality); R-A (leg order);
-R-B (multi-input `grantReference`). An actor-hive gate is queued as an Item
-3.2 / addendum candidate, not a ruling.
+R-B (multi-input `grantReference`); Item 3.2 gate rulings, 2026-08-30 —
+(a) one horizon step 3h before the assembly write, timeout check moved
+(option B); (b) replay leg post-pass, AC-3.2.1 ordering read against the
+before-horizon leg; (c) D-7 taken with a decision record; (d) runner
+defaults `--grant-horizon-s 90` floor 60, `--horizon-s 120` unchanged;
+(e) actor-hive gate candidate **dropped from Item 3.2, kept for the
+addendum** — still not a ruling; (f) the Item 3.2 substrate test in the
+default glob, no spike.
 
 Decision files are kept with the project's working records; each is the head
 of its supersede chain until a later file names it.

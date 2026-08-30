@@ -3,8 +3,8 @@
 **Instrument:** PC#8 build plan v0.1 §H.3 observation log format
 **Produced:** 2026-08-17 (Phase 0 closing deliverable, per session scope)
 **Feeds:** `pc08-kl1-kl2-closing-evidence_YYYY-MM-DD.md`
-**Status:** ACTIVE — entries appended through Run 6 (2026-08-29 local /
-2026-08-30 UTC); Item 2.2 note appended; Run 6 carries an operator-notes section. One entry block per crossing run; append-only; do not edit
+**Status:** ACTIVE — entries appended through Run 7 (2026-08-30 UTC);
+Item 2.2 note appended; Runs 6 and 7 carry operator-notes sections. One entry block per crossing run; append-only; do not edit
 prior entries. Entry format extended with the three `phase3_*` fields at
 Phase 3 open (2026-08-29); see `CONVENTIONS.md` §Observation log.
 
@@ -209,6 +209,37 @@ storage_scan_note:   Runner storage-scan positive control returned 0 hits; the s
 transport_transients: (1) create-time "no derivable PCS key … dropping outgoing blob" once per document (S5 watch item, reproduced). (2) Spike Q2b: interceptor logged "CGKA decrypt failed … Key not found; leaving pending" twice on a granted document, then read a/b in plaintext on the next round. Both transient; watch items.
 ciphertext_persistence: bytesUnderC=0 in the actor's repo storage (spike and runner): section_c ciphertext transits on sync but is not persisted under the document's storage key. Sharpens "ciphertext transits; plaintext does not".
 appview_observation: surfaced — whtwnd.com/localboundary.bsky.social/3mubag4iqdp2q renders section_a + section_b (title from first input; displayed date = content createdAt 01:27:43.680Z, not publish time); section_c absent on the surface (B-5); seamCrossingRef not rendered — unknown field dropped at the AppView, unchanged from Runs 4–5. Observed 2026-08-29 local.
+```
+
+### Run 7 — Item 3.2 delayed-release crossing (before-horizon → after-horizon → replay)
+
+```
+crossing_run:        7
+scenario:            delayed-release
+intent_emitted_at:   2026-08-30T17:46:40.764Z
+putrecord_called_at: 2026-08-30T17:46:40.772Z
+pds_accepted_at:     2026-08-30T17:46:41.145Z
+relay_ingested_at:   null
+completion_written_at: 2026-08-30T17:46:41.282Z
+crossing_outcome:    completed
+pds_accept_latency_ms: 373
+relay_ingest_gap_ms: null
+intent_without_completion_window_ms: 511
+kl1_legibility_observation: Fired; publish accepted; crossing-completion minted in the ASSEMBLY document (actor-owned; author holds read) and confirmed document-resident. Document-legible state: crossing-complete. KL-1 (D-5 cost, not a defect): a deferred party following sourceDocumentURI lands on the actor's assembly document automerge:VU6yb3VHQ25Dsob1fzmmJYH8z7AgWinFw977UgfQ2STd4wVJF, not the author's content documents; the author's documents are reachable only via the intent's sourceLineage (1 entries) and carry no crossing records. Gate evaluated on the issuer's hive, not the presenting party's (ruling 2) — legibility note.
+kl2_back_pointer_observation: seamCrossingRef (four-field singular shape) returned INTACT by getRecord(); it points at the ASSEMBLY document automerge:VU6yb3VHQ25Dsob1fzmmJYH8z7AgWinFw977UgfQ2STd4wVJF (D-5), not an input. AppView surface/drop (whtwnd.com): operator observation — expected unchanged from Runs 4–5 (dropped at AppView); record manually.
+phase3_pattern:      delayed-release
+phase3_gate_observation: BEFORE-HORIZON leg: attempt at 2026-08-30T17:45:09.738Z with crossingGrantHorizon=2026-08-30T17:46:39.734Z → horizon-not-reached (horizon step 3h, fresh clock read; now=2026-08-30T17:45:09.739Z < crossingGrantHorizon=2026-08-30T17:46:39.734Z; not yet authorized (D-2); no assembly write, no intent record); block logged 2026-08-30T17:45:09.739Z; assembly document untouched=true; intent records=0; putRecord not called. | Wait: wall clock before sleep 2026-08-30T17:45:09.739Z; after sleep 2026-08-30T17:46:40.735Z; T1=2026-08-30T17:46:39.734Z (spec r2 FM2 — real wall clock at both crossings, no injected clock). | AFTER-HORIZON leg: attempt at 2026-08-30T17:46:41.145Z with crossingGrantHorizon=2026-08-30T17:46:39.734Z (T1 passed) → gate passed on isReader (issuer's hive) → assembled → digest matched → horizon step passed (fresh clock read) → assembly document written → fired; intent carries crossingGrantHorizon=2026-08-30T17:46:39.734Z and crossingTimeoutHorizon=2026-08-30T17:48:39.734Z (AC-3.2.3). | REPLAY leg (adversarial, post-pass by design): attempt at 2026-08-30T17:46:41.161Z with a fresh crossingGrantHorizon=2026-08-30T17:48:11.145Z set after the pass → horizon-not-reached — the pass was not cached; fresh clock read each attempt; assembly document untouched=true; no intent; putRecord not called. Its block timestamp follows the after-horizon intent; AC-3.2.1's ordering clause is the before-horizon leg's.
+phase3_finding:      Membership lag (spike D-4; fixture timing, not a gate): actor's hive saw its read grant after section_a 2015ms; actor-side find() succeeded after the wait. | Assembly document creator access (before-horizon leg): accessForDoc(self)=Admin; members: ff578dc3e17f…:Admin (self), fec4dc793a31…:Read. | Assembly document creator access (after-horizon leg): accessForDoc(self)=Admin; members: fec4dc793a31…:Read, ff578dc3e17f…:Admin (self). | CID observation (spike D-6): sourceDocumentCID=2EfnUTyykvJUKBoA2SV85kH5Qr3akowtiSj4yVpSsHqWvDbhTD names the assembly document's heads including the author's membership nudge commit (nudge field present on assembly document=true); sourceLineage documentCIDs automerge:2h7rDxLFwtsjTQZ4gttfqxSn5meTcKFuGEcJyCzRMStTQyDgiL@232RcPAjicNDcsV7Fd6ub8gii4RpAkfSPGrquK2aeu3NhqsKGP each include the nudge commit on the granted input. Content object and digests unaffected (step-4 recompute equal). | F-3.2-1: at 6479fc7 the timeout check ran after the assembly write; from this diff both horizon checks run in one step (3h) before any write — no assembly content on any horizon block at mint. KL-12: observation only — lower-bound gate on the intent record shown; grant-authority lapse NOT exercised (read grant persisted across all legs; the seam refused, not the grant); recallSemantics staleness n/a (no external protocol change); mid-horizon drift n/a on this stack. F-3.2-2 (AC-3.2.5): term says "grant", host is the intent record; distinction from crossingTimeoutHorizon is semantic (earliest-authorized vs latest-before-unconfirmed); name-follows-host queued to the KL-12 evidence session.
+```
+
+### Run 7 — operator notes (2026-08-30)
+
+```
+kl12_observation_note: KL-12 observation only — not closing evidence; PROPOSED status unchanged. Field hosted on the crossing-intent record (D-2), not on the grant (Keyhive Access has no fields). Lower-bound gate: YES — before-horizon leg blocked at 2026-08-30T17:45:09.739Z against T1=2026-08-30T17:46:39.734Z with no assembly write and no record; after-horizon leg fired at 17:46:40.764Z (gate started 17:46:40.755Z, 1.02s after T1, real wall clock both sides); replay leg blocked at 17:46:41.162Z against a fresh T1'=17:48:11.145Z set 1s after the pass — no cached decision. Grant-authority lapse: NOT observed — the read grant persisted across all three legs; the seam, not the grant, refused. Mid-horizon drift: n/a — grant carries no horizon to drift on this stack. recallSemantics staleness: n/a — no external protocol change occurred. Naming (F-3.2-2, AC-3.2.5): term says "grant", host is the intent record; distinction from crossingTimeoutHorizon is semantic (earliest-authorized vs latest-before-unconfirmed), clean in code; name-follows-host queued to the KL-12 evidence session.
+ac_confirmation:     AC-3.2.1, AC-3.2.2, AC-3.2.3, AC-3.2.4, AC-3.2.5, AC-3.2.6 confirmed by operator against this entry and this notes section, 2026-08-30. Adversarial step (spec r2): replay leg confirmed.
+relay_note:          F-3.2-5 — relay_ingested_at null (applicable, unobserved). Jetstream watcher opened 17:45:09, fire at 17:46:41 — 92s idle across the embargo wait; Runs 1–6 fired within seconds of open; check-pds ingested 179ms three minutes earlier. KL-2 unaffected (getRecord intact). Queued runner fix: open the watcher after the wait. Not re-run.
+runner_wording_note: F-3.2-6 — the AFTER-HORIZON gate observation's "attempt at 17:46:41.145Z" was stamped post-leg; the crossing log (gate-check-started 17:46:40.755Z) is authoritative. Cosmetic; queued with F-3.2-5.
+appview_observation: surfaced — whtwnd.com/localboundary.bsky.social/3mucx4edq542p renders the timed-release content (title "PC#8 governed crossing — Run 7 — timed-release"); seamCrossingRef not rendered — dropped at the AppView, unchanged Runs 4–7 (KL-2). Displayed date = content createdAt 17:45:07Z (fixture time, BEFORE T1), while the publish occurred 17:46:41Z (after T1): the surface shows a pre-embargo timestamp for a post-embargo publish. Horizon-gating is legible only from the intent record (both horizons + emittedAt > T1), not from the AppView surface — KL-1-adjacent legibility note specific to delayed release. Observed 2026-08-30 local.
 ```
 
 *Append-only. Canonical copy: operator's machine; `substrate-crossing/docs/` in the employment-seam repo.*

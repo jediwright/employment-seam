@@ -25,6 +25,17 @@
  *   fire unless the intent record exists in the local document. A blocked
  *   gate check produces NO intent record. An expired crossingTimeoutHorizon
  *   rejects the crossing without firing.
+ *
+ * Item 3.2 (Run 7) — crossingGrantHorizon (D-2; brief v0.1 §2–3; D-7):
+ *   an optional not-before horizon hosted on the intent record beside
+ *   crossingTimeoutHorizon (seam-level; Keyhive Access carries no fields).
+ *   Both horizons are checked in ONE horizon step, from ONE fresh clock
+ *   read, after the digest check and BEFORE the assembly-document write,
+ *   so any horizon block at mint leaves the assembly document untouched
+ *   (F-3.2-1: at 6479fc7 the timeout check ran after the write). Nothing
+ *   is retained between attempts. A request whose grant horizon is at or
+ *   after its timeout horizon can never mint and is refused explicitly
+ *   (D-7: horizon-inconsistent).
  */
 
 import { createHash } from 'node:crypto';
@@ -97,6 +108,18 @@ export interface CrossingIntentRecord {
   // Timeout discipline — host object: intent record (KL-8c / SL-0114;
   // Lexicon C2 correction queued, not yet applied)
   crossingTimeoutHorizon: string; // ISO timestamp
+  /**
+   * Item 3.2 (D-2): earliest-authorized (not-before) horizon, ISO. Optional;
+   * OMITTED (not null) when the request carries none, so Runs 1–6 records
+   * and their crossingIntentRef are unchanged. Hosted on the intent record,
+   * NOT the grant (Keyhive Access has no fields). Checked from the system
+   * clock at mint, fresh on every attempt; a pre-horizon attempt mints no
+   * record. Semantic distinction from crossingTimeoutHorizon:
+   * earliest-authorized vs latest-before-unconfirmed — same host object.
+   * The term is PROPOSED (KL-12); this field is an implementation decision,
+   * not lexicon evidence.
+   */
+  crossingGrantHorizon?: string;
 
   // Lineage anchoring
   lineageAnchorType: 'author-declared';
@@ -186,6 +209,16 @@ export function validateCrossingIntentRecord(
       errors.push(`field ${f} is not a parseable ISO timestamp: ${v}`);
     }
   }
+  // Item 3.2: optional field — absent is valid; present must be a non-empty
+  // parseable ISO timestamp (the record never carries a null field).
+  if ('crossingGrantHorizon' in rec) {
+    const v = rec.crossingGrantHorizon;
+    if (v === undefined || v === null || v === '') {
+      errors.push('field crossingGrantHorizon present but null or empty (omit it instead)');
+    } else if (typeof v !== 'string' || Number.isNaN(Date.parse(v))) {
+      errors.push(`field crossingGrantHorizon is not a parseable ISO timestamp: ${String(v)}`);
+    }
+  }
   return { valid: errors.length === 0, errors };
 }
 
@@ -255,6 +288,9 @@ export type CrossingEvent =
   | 'digest-check-pass'
   | 'digest-check-blocked'
   | 'assembly-document-written'
+  // Item 3.2 — horizon step (3h) blocks; both precede any assembly write
+  | 'grant-horizon-not-reached'
+  | 'horizon-inconsistent'
   | 'intent-record-written'
   | 'intent-record-read-confirmed'
   | 'timeout-horizon-expired'
@@ -318,6 +354,8 @@ export interface InitiateCrossingParams {
   targetPDS: string;
   regimeAcknowledgment: string;
   crossingTimeoutHorizon: string; // ISO
+  /** Item 3.2 (D-2): optional not-before horizon, ISO. Omit for none. */
+  crossingGrantHorizon?: string;
   clock?: Clock;
   log?: CrossingLogEntry[];
 }
@@ -326,7 +364,10 @@ export type CrossingOutcome =
   | { status: 'fired'; intent: CrossingIntentRecord; put: { uri: string; cid: string }; log: CrossingLogEntry[] }
   | { status: 'gate-blocked'; reason: string; log: CrossingLogEntry[] }
   | { status: 'digest-blocked'; reason: string; log: CrossingLogEntry[] }
-  | { status: 'horizon-expired'; reason: string; log: CrossingLogEntry[] };
+  | { status: 'horizon-expired'; reason: string; log: CrossingLogEntry[] }
+  // Item 3.2
+  | { status: 'horizon-not-reached'; reason: string; log: CrossingLogEntry[] }
+  | { status: 'horizon-inconsistent'; reason: string; log: CrossingLogEntry[] };
 
 /**
  * Executes one governed crossing attempt under the write-before-fire
@@ -339,14 +380,22 @@ export type CrossingOutcome =
  *   3. Digest check: authorizedContentDigest over the assembly vs. over the
  *      presented content, hash equality only. Mismatch → stop; nothing
  *      written (no orphan assembly document).
+ *   3h. HORIZON STEP (Item 3.2, brief v0.1 §3 option B) — one fresh clock
+ *      read; nothing written on any block:
+ *        a. crossingGrantHorizon present but unparseable → seam fault (throw);
+ *        b. crossingGrantHorizon ≥ crossingTimeoutHorizon → horizon-inconsistent (D-7);
+ *        c. now < crossingGrantHorizon → horizon-not-reached (no record; D-2);
+ *        d. now ≥ crossingTimeoutHorizon → horizon-expired (KL-8a; moved here
+ *           from after the write — F-3.2-1).
  *   4. Write the assembled output to the assembly document; recompute the
  *      digest over the document's content object — inequality is a seam
  *      fault (thrown), not a gate block.
- *   5. crossingTimeoutHorizon must be in the future at mint (KL-8a).
+ *   5. (moved into 3h.d)
  *   6. Mint the intent record into the assembly document's crossingRecords
- *      (sourceDocumentURI/CID = assembly document; sourceLineage = inputs).
+ *      (sourceDocumentURI/CID = assembly document; sourceLineage = inputs;
+ *      crossingGrantHorizon carried when present).
  *   7. Read back; confirm present.
- *   8. Re-check the horizon at fire; expired → do not fire.
+ *   8. Re-check the timeout horizon at fire; expired → do not fire.
  *   9. Fire putRecord(intent).
  */
 export async function initiateCrossing(
@@ -402,6 +451,40 @@ export async function initiateCrossing(
   }
   stamp('digest-check-pass', assembledDigest);
 
+  // 3h — horizon step: ONE fresh clock read for both horizons; nothing
+  // written on any block; nothing retained between attempts (Item 3.2).
+  const horizonMs = Date.parse(p.crossingTimeoutHorizon);
+  const grantHorizon = p.crossingGrantHorizon;
+  const now = clock();
+  const nowMs = now.getTime();
+  if (grantHorizon !== undefined) {
+    if (grantHorizon === null || grantHorizon === '') {
+      throw new Error('seam fault: crossingGrantHorizon present but empty; omit it for no not-before horizon');
+    }
+    const grantMs = Date.parse(grantHorizon);
+    if (Number.isNaN(grantMs)) {
+      throw new Error(`seam fault: crossingGrantHorizon is not a parseable ISO timestamp: ${grantHorizon}`);
+    }
+    if (Number.isNaN(horizonMs) || grantMs >= horizonMs) {
+      const reason = `crossingGrantHorizon=${grantHorizon} is not before crossingTimeoutHorizon=${p.crossingTimeoutHorizon}; the request can never mint (D-7); no assembly write, no intent record`;
+      stamp('horizon-inconsistent', reason);
+      return { status: 'horizon-inconsistent', reason, log };
+    }
+    if (nowMs < grantMs) {
+      const reason = `now=${now.toISOString()} < crossingGrantHorizon=${grantHorizon}; not yet authorized (D-2); no assembly write, no intent record`;
+      stamp('grant-horizon-not-reached', reason);
+      return { status: 'horizon-not-reached', reason, log };
+    }
+  }
+  if (Number.isNaN(horizonMs) || nowMs >= horizonMs) {
+    stamp('timeout-horizon-expired', `now=${now.toISOString()} >= crossingTimeoutHorizon=${p.crossingTimeoutHorizon}; expired at mint time; no assembly write, no intent record`);
+    return {
+      status: 'horizon-expired',
+      reason: 'crossingTimeoutHorizon expired before intent record mint; new gate pass required (KL-8a)',
+      log,
+    };
+  }
+
   // 4 — write the assembled output to the assembly document; recompute
   p.handle.change((d) => {
     d.title = assembled.title;
@@ -417,16 +500,7 @@ export async function initiateCrossing(
   }
   stamp('assembly-document-written', writtenDigest);
 
-  // 5 — horizon must be in the future at mint time
-  const horizonMs = Date.parse(p.crossingTimeoutHorizon);
-  if (Number.isNaN(horizonMs) || clock().getTime() >= horizonMs) {
-    stamp('timeout-horizon-expired', 'expired at mint time; no intent record minted');
-    return {
-      status: 'horizon-expired',
-      reason: 'crossingTimeoutHorizon expired before intent record mint; new gate pass required (KL-8a)',
-      log,
-    };
-  }
+  // 5 — (moved into the horizon step 3h — Item 3.2 / F-3.2-1)
 
   // 6 — mint + write the intent record into the assembly document
   const heads = p.handle.heads?.();
@@ -448,6 +522,8 @@ export async function initiateCrossing(
     declaredBoundType: 'exposure-unbounded',
     recallSemantics: 'propagated-request',
     crossingTimeoutHorizon: p.crossingTimeoutHorizon,
+    // Item 3.2: spread so the key is OMITTED (never undefined/null) when absent
+    ...(grantHorizon !== undefined ? { crossingGrantHorizon: grantHorizon } : {}),
     lineageAnchorType: 'author-declared',
     emittedAt: clock().toISOString(),
     grantReference: firstGate.grantReference!,
