@@ -3,8 +3,8 @@
 **Instrument:** PC#8 build plan v0.1 §H.3 observation log format
 **Produced:** 2026-08-17 (Phase 0 closing deliverable, per session scope)
 **Feeds:** `pc08-kl1-kl2-closing-evidence_YYYY-MM-DD.md`
-**Status:** ACTIVE — entries appended through Run 5 (2026-08-18); Item 2.2
-note appended. One entry block per crossing run; append-only; do not edit
+**Status:** ACTIVE — entries appended through Run 6 (2026-08-29 local /
+2026-08-30 UTC); Item 2.2 note appended; Run 6 carries an operator-notes section. One entry block per crossing run; append-only; do not edit
 prior entries. Entry format extended with the three `phase3_*` fields at
 Phase 3 open (2026-08-29); see `CONVENTIONS.md` §Observation log.
 
@@ -177,6 +177,38 @@ run_cids:            Run 2 = bafyreicmlwc3hv42dk3a34lxledd22syjc3zfvu6boqorn2qoh
                      Run 1 = bafyreify3v7no62eezhbcvfzpiqwe7a5dblyhkwbbffpy37h5eznp3btdq (provenance only)
 note:                CID is content-addressed and stable across PDS retrieve; migration
                      stability deferred.
+```
+
+### Run 6 — Item 3.1 public-subset crossing (negative → adversarial → positive)
+
+```
+crossing_run:        6
+scenario:            public-subset
+intent_emitted_at:   2026-08-30T01:27:52.317Z
+putrecord_called_at: 2026-08-30T01:27:52.322Z
+pds_accepted_at:     2026-08-30T01:27:52.628Z
+relay_ingested_at:   2026-08-30T01:28:08.506Z
+completion_written_at: 2026-08-30T01:28:08.800Z
+crossing_outcome:    completed
+pds_accept_latency_ms: 306
+relay_ingest_gap_ms: 15878
+intent_without_completion_window_ms: 16478
+kl1_legibility_observation: Fired; publish accepted; crossing-completion minted in the ASSEMBLY document (actor-owned; author holds read) and confirmed document-resident. Document-legible state: crossing-complete. KL-1 (D-5 cost, not a defect): a deferred party following sourceDocumentURI lands on the actor's assembly document automerge:2stjg5ft1kCK29dsybrQ7koFRVHtGRm3sAXTshCtPzHN9rsBnE, not the author's content documents; the author's documents are reachable only via the intent's sourceLineage (2 entries) and carry no crossing records. Gate evaluated on the issuer's hive, not the presenting party's (ruling 2) — legibility note.
+kl2_back_pointer_observation: seamCrossingRef (four-field singular shape) returned INTACT by getRecord(); it points at the ASSEMBLY document automerge:2stjg5ft1kCK29dsybrQ7koFRVHtGRm3sAXTshCtPzHN9rsBnE (D-5), not an input. B-5: published record or sourceLineage names section_c = false (expected false). AppView surface/drop (whtwnd.com): operator observation — expected unchanged from Runs 4–5 (dropped at AppView); record manually.
+phase3_pattern:      public-subset
+phase3_gate_observation: NEGATIVE leg: presented [section_a, section_b, section_c] → gate-blocked at accessForDoc(section_c) on the issuer's hive: no authorizing grant present in causal history [automerge:29u89rH3Zf67A9Pno4GazauVsLhw6dZTz2PYUe1mQBgAG1ALBo]; block logged 2026-08-30T01:27:52.297Z; assembly document untouched=true; intent records=0; putRecord not called. | ADVERSARIAL leg: presented [section_a, section_b] + appended foreign bytes → digest-blocked on hash inequality at step 3 (both gates passed); assembly document untouched=true; no intent; putRecord not called. | POSITIVE leg: presented 2 granted input(s) → gate passed on isReader for each (issuer's hive) → assembled → digest matched → assembly document written → fired.
+phase3_finding:      Membership lag (spike D-4; fixture timing, not a gate): actor's hive saw its read grant after section_a 2012ms, section_b 1ms; actor-side find() succeeded after the wait. | section_c (no grant) not decryptable by the actor: handle pending at timeout (2 round(s) over 6000ms: timeout:find:section_c); actor repo storage: chunks=19, bytes under section_c=0, section_c plaintext hits=0, control (section_a) plaintext hits=0. Ciphertext transits; plaintext does not (spike Q2, SL-0186). Evidence file: substrate-crossing/test/spike/spike-3-1b-encrypted-transport.test.ts. | Membership nudge (spike D-6, author-hive write, not a seam write): __automerge-repo-keyhive__last-added-member-ts present on section_a=true, section_b=true, section_c=false (expected true/true/false). Content object {title, content, createdAt} unaffected; nudge commit is included in the lineage documentCIDs read post-grant — observation, not defect. | Assembly document creator access (negative leg): accessForDoc(self)=Admin; members: 9b2273a865fb…:Read, 2682d95b5658…:Admin (self). | Negative leg: section_c presented to the gate by document ID; actor-side handle pending at timeout (un-granted, not decryptable — spike D-5); gate exercised on the ID at step 1. | Assembly document creator access (positive leg): accessForDoc(self)=Admin; members: 9b2273a865fb…:Read, 2682d95b5658…:Admin (self). | CID observation (spike D-6): sourceDocumentCID=4inBcReFpaK3dpBX2gbD6bfdDr8E4EsfPbFEFZLqgonWWtAkV names the assembly document's heads including the author's membership nudge commit (nudge field present on assembly document=true); sourceLineage documentCIDs automerge:iBY6skLvYuxLujtgQCiGv9zwyCMcj8i1VRLsGGAwSkxYrnn28@2Mm7rojH8dE4M69h3BHUAMpfZ37J3rF9tL2EWp2tVANoorAV1R, automerge:n8Q7cLP7kuBQ41n62ZVbTb6qJnW9QoJtmSZrGuqsaoszFXCmW@h2ddJNhRe5CRzN7eQ2NZgEAmMH3nxJkticq5TQn7LSdxXUWLy each include the nudge commit on the granted input. Content object and digests unaffected (step-4 recompute equal).
+```
+
+### Run 6 — operator notes (2026-08-29 local / 2026-08-30 UTC)
+
+```
+ac_3_1_4_observation: Public subset crossing — grant boundary equals publish boundary; unauthorized section held in a separate document with no grant to the crossing actor; assembled output bound by digest; foreign-byte injection blocked on hash mismatch. Subset confinement on this stack is a capability-layer property achieved by document decomposition — on the encrypted (subduction) transport the un-granted document is not decryptable by the actor; ciphertext transits — and the seam's digest binds the assembled output.
+ac_confirmation:     AC-3.1.1, AC-3.1.2, AC-3.1.3, AC-3.1.4, AC-3.1.5 confirmed by operator against this entry, 2026-08-29.
+storage_scan_note:   Runner storage-scan positive control returned 0 hits; the scan half of the un-granted probe is inconclusive in the runner for this run. Storage evidence for AC-3.1.2 rests on the Item 3.1 test leg (control 1 / section_c hits 0) and the spike (control 1 / hits 0 / bytesUnderC 0), both run on the operator's machine 2026-08-29 21:22 local at b075038 + the staged Run 6 files. Cause to be determined at the Run 6 close session.
+transport_transients: (1) create-time "no derivable PCS key … dropping outgoing blob" once per document (S5 watch item, reproduced). (2) Spike Q2b: interceptor logged "CGKA decrypt failed … Key not found; leaving pending" twice on a granted document, then read a/b in plaintext on the next round. Both transient; watch items.
+ciphertext_persistence: bytesUnderC=0 in the actor's repo storage (spike and runner): section_c ciphertext transits on sync but is not persisted under the document's storage key. Sharpens "ciphertext transits; plaintext does not".
+appview_observation: surfaced — whtwnd.com/localboundary.bsky.social/3mubag4iqdp2q renders section_a + section_b (title from first input; displayed date = content createdAt 01:27:43.680Z, not publish time); section_c absent on the surface (B-5); seamCrossingRef not rendered — unknown field dropped at the AppView, unchanged from Runs 4–5. Observed 2026-08-29 local.
 ```
 
 *Append-only. Canonical copy: operator's machine; `substrate-crossing/docs/` in the employment-seam repo.*

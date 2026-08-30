@@ -8,6 +8,12 @@
  * Wiring mirrors Phase 0 Item 0.3: automerge-repo-keyhive over a
  * DummyNetworkAdapter pair, repo.create2() (A3-confirmed Keyhive create
  * path), addMemberToDoc + accessForDoc as the real gate substrate.
+ *
+ * Item 3.1 (Run 6) update: the seam now takes `inputs[]` + an assembly
+ * document handle + `presentedContent`, and the gate is per document
+ * (`isReader`). These tests keep their Item 1.1 assertions and run through
+ * the uniform path with one granted input; `handle` below is the granted
+ * content document and `asm` the actor-side assembly document.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import '@automerge/automerge';
@@ -29,13 +35,15 @@ import {
   type CrossingDocShape,
   type GateCheckFn,
 } from '../src/crossing-intent.js';
+import { assembleCrossingContent } from '../src/assembly.js';
 
 const TEST_DID = 'did:plc:testoperator0000000000000';
 const TARGET_PDS = 'https://bsky.social';
 const ACK =
   'I acknowledge that this crossing terminates seam-stack enforcement at the AT Protocol boundary; recall is a propagated request.';
 
-let handle: any;
+let handle: any;   // granted content document (author-created)
+let asm: any;      // assembly document (D-5) — hosts the crossing records
 let hiveOwner: any;
 let actorId: any; // keyhive Identifier of the granted actor
 
@@ -64,30 +72,35 @@ async function makeKeyhiveDocWithGrant() {
   const card = actor.hive.active.contactCard;
   const individual = await owner.hive.receiveContactCard(card);
   await owner.hive.addMemberToDoc(h.url, card, Access.read());
-  return { handle: h, ownerHive: owner.hive, actorId: individual!.id };
+  // Item 3.1: the assembly document is created by the actor (D-5).
+  const a = await (actor.repo as any).create2({ title: '', content: '', createdAt: null });
+  return { handle: h, asm: a, ownerHive: owner.hive, actorId: individual!.id };
 }
 
 beforeAll(async () => {
   const built = await makeKeyhiveDocWithGrant();
   handle = built.handle;
+  asm = built.asm;
   hiveOwner = built.ownerHive;
   actorId = built.actorId;
 });
 
-/** Real gate check over the Keyhive grant: pass iff the actor holds
- *  read-or-better access on the doc at check time. */
+/** Real per-document gate check over the Keyhive grant (D-4): pass iff the
+ *  actor holds `isReader` on that document at check time. */
 function realGate(clockNow: () => Date): GateCheckFn {
-  return async () => {
-    const access = await hiveOwner.accessForDoc(actorId, handle.url);
+  return async ({ documentURI }) => {
+    const access = await hiveOwner.accessForDoc(actorId, documentURI as any);
     const at = clockNow().toISOString();
-    if (access !== undefined && access !== null) {
+    if (access !== undefined && access !== null && access.isReader) {
       return {
         result: 'pass' as const,
-        grantReference: `keyhive:${handle.url}#${String(access)}`,
+        grantReference: `keyhive:${documentURI}#${String(access)}`,
         gateCheckedAt: at,
+        access: String(access),
+        documentURI,
       };
     }
-    return { result: 'blocked' as const, grantReference: null, gateCheckedAt: at, reason: 'no grant for actor' };
+    return { result: 'blocked' as const, grantReference: null, gateCheckedAt: at, reason: 'no grant for actor', documentURI };
   };
 }
 
@@ -102,16 +115,28 @@ function wrapHandle(h: any) {
   };
 }
 
+/** What the caller presents: its own assembly of the granted input(s). */
+async function presentedFrom(...hs: any[]) {
+  const contents = [];
+  for (const h of hs) {
+    const d = await h.doc();
+    contents.push({ title: d.title, content: d.content, createdAt: d.createdAt });
+  }
+  return assembleCrossingContent(contents);
+}
+
 describe('Item 1.1 — crossing-intent record', () => {
   it('AC-i: writes the intent record before putRecord() fires (log order + doc state at fire time)', async () => {
     const log: CrossingLogEntry[] = [];
     let docStateAtFire: CrossingDocShape | null = null;
     const putRecord = async () => {
-      docStateAtFire = await handle.doc();
+      docStateAtFire = await asm.doc();
       return { uri: `at://${TEST_DID}/com.whtwnd.blog.entry/test`, cid: 'bafyreitestcid' };
     };
     const outcome = await initiateCrossing({
-      handle: wrapHandle(handle),
+      inputs: [wrapHandle(handle)],
+      handle: wrapHandle(asm),
+      presentedContent: await presentedFrom(handle),
       gateCheck: realGate(() => new Date()),
       putRecord,
       identity: { grantorDID: TEST_DID, targetDID: TEST_DID, identityCustodyClass: 'provider-custodied' },
@@ -138,7 +163,9 @@ describe('Item 1.1 — crossing-intent record', () => {
   });
 
   it('AC-ii: intent record carries all required fields, non-null, schema-valid', async () => {
-    const doc: CrossingDocShape = await handle.doc();
+    // Item 3.1: records live in the ASSEMBLY document; its content object is
+    // the assembled output (one input → same content), so the digest binds it.
+    const doc: CrossingDocShape = await asm.doc();
     const recs = (doc.crossingRecords ?? []) as CrossingIntentRecord[];
     expect(recs.length).toBeGreaterThan(0);
     const rec = recs[recs.length - 1];
@@ -158,6 +185,10 @@ describe('Item 1.1 — crossing-intent record', () => {
     expect(validateCrossingIntentRecord({ ...rec, grantorDID: '' }).valid).toBe(false);
     expect(validateCrossingIntentRecord({ ...rec, gateResult: 'blocked' as any }).valid).toBe(false);
     expect(validateCrossingIntentRecord({ ...rec, identityCustodyClass: 'sovereign' as any }).valid).toBe(false);
+    // Item 3.1: sourceLineage names the granted input; the record names the assembly doc.
+    expect(rec.sourceDocumentURI).toBe(asm.url);
+    expect(rec.sourceLineage.map((l) => l.documentURI)).toEqual([handle.url]);
+    expect(validateCrossingIntentRecord({ ...rec, sourceLineage: [] }).valid).toBe(false);
   });
 
   it('AC-iii: a blocked gate check produces no intent record and does not fire', async () => {
@@ -167,18 +198,21 @@ describe('Item 1.1 — crossing-intent record', () => {
       title: 'ungranted', content: 'x', createdAt: new Date().toISOString(),
     });
     const ind2 = await owner.hive.receiveContactCard(actor.hive.active.contactCard);
+    const asm2 = await (actor.repo as any).create2({ title: '', content: '', createdAt: null });
     // NOTE: no addMemberToDoc call — actor holds no grant.
-    const gate: GateCheckFn = async () => {
-      const access = await owner.hive.accessForDoc(ind2!.id, h2.url);
+    const gate: GateCheckFn = async ({ documentURI }) => {
+      const access = await owner.hive.accessForDoc(ind2!.id, documentURI as any);
       const at = new Date().toISOString();
-      return access !== undefined && access !== null
-        ? { result: 'pass', grantReference: 'unexpected', gateCheckedAt: at }
-        : { result: 'blocked', grantReference: null, gateCheckedAt: at, reason: 'no grant for actor' };
+      return access !== undefined && access !== null && access.isReader
+        ? { result: 'pass', grantReference: 'unexpected', gateCheckedAt: at, documentURI }
+        : { result: 'blocked', grantReference: null, gateCheckedAt: at, reason: 'no grant for actor', documentURI };
     };
     let fired = false;
     const log: CrossingLogEntry[] = [];
     const outcome = await initiateCrossing({
-      handle: wrapHandle(h2),
+      inputs: [wrapHandle(h2)],
+      handle: wrapHandle(asm2),
+      presentedContent: { title: 'ungranted', content: 'x', createdAt: undefined },
       gateCheck: gate,
       putRecord: async () => { fired = true; return { uri: 'x', cid: 'x' }; },
       identity: { grantorDID: TEST_DID, targetDID: TEST_DID, identityCustodyClass: 'provider-custodied' },
@@ -188,19 +222,24 @@ describe('Item 1.1 — crossing-intent record', () => {
       log,
     });
     expect(outcome.status).toBe('gate-blocked');
+    if (outcome.status === 'gate-blocked') expect(outcome.reason).toContain(h2.url); // block names the document (S2 B-7)
     expect(fired).toBe(false);
-    const d2: CrossingDocShape = await h2.doc();
+    const d2: CrossingDocShape = await asm2.doc();
     expect(d2.crossingRecords ?? []).toHaveLength(0); // NO intent record minted
+    expect(d2.title).toBe(''); // NO assembly write (no orphan)
     expect(log.map((e) => e.event)).not.toContain('intent-record-written');
+    expect(log.map((e) => e.event)).not.toContain('assembly-document-written');
   });
 
   it('AC-iv: expired crossingTimeoutHorizon rejects without firing — both expiry positions', async () => {
     // (a) horizon already expired at mint time → no intent record, no fire
     let fired = false;
     const logA: CrossingLogEntry[] = [];
-    const before = ((await handle.doc()).crossingRecords ?? []).length;
+    const before = ((await asm.doc()).crossingRecords ?? []).length;
     const outA = await initiateCrossing({
-      handle: wrapHandle(handle),
+      inputs: [wrapHandle(handle)],
+      handle: wrapHandle(asm),
+      presentedContent: await presentedFrom(handle),
       gateCheck: realGate(() => new Date()),
       putRecord: async () => { fired = true; return { uri: 'x', cid: 'x' }; },
       identity: { grantorDID: TEST_DID, targetDID: TEST_DID, identityCustodyClass: 'provider-custodied' },
@@ -211,18 +250,19 @@ describe('Item 1.1 — crossing-intent record', () => {
     });
     expect(outA.status).toBe('horizon-expired');
     expect(fired).toBe(false);
-    expect(((await handle.doc()).crossingRecords ?? []).length).toBe(before);
+    expect(((await asm.doc()).crossingRecords ?? []).length).toBe(before);
 
     // (b) horizon expires between intent write and fire (injected clock
     // advances past the horizon after the read-confirm step) → intent
     // record present, putRecord NOT fired (crossing-unconfirmed posture)
     let t = Date.parse('2026-08-18T12:00:00.000Z');
-    // Clock advances 3s per observation. Observations before the mint-time
-    // horizon check: gate-started stamp, gate-pass stamp, then the check
-    // itself (t0+6s). Observations before the fire-time check: emittedAt,
-    // written stamp, read-confirmed stamp, then the check (t0+18s).
-    // Horizon at t0+10s → alive at mint, expired at fire.
-    const horizon = new Date(t + 10_000).toISOString();
+    // Clock advances 3s per observation. Item 3.1 order: gate-started,
+    // gate-pass, assembly-completed, digest-check-pass,
+    // assembly-document-written (5 stamps, t0..t0+12s), then the mint-time
+    // horizon check (t0+15s). Then emittedAt, written, read-confirmed
+    // (t0+18..24s), then the fire-time check (t0+27s).
+    // Horizon at t0+16s → alive at mint, expired at fire.
+    const horizon = new Date(t + 16_000).toISOString();
     const clock = () => {
       const d = new Date(t);
       t += 3_000; // each observation advances 3s; horizon passes mid-flow
@@ -231,7 +271,9 @@ describe('Item 1.1 — crossing-intent record', () => {
     let firedB = false;
     const logB: CrossingLogEntry[] = [];
     const outB = await initiateCrossing({
-      handle: wrapHandle(handle),
+      inputs: [wrapHandle(handle)],
+      handle: wrapHandle(asm),
+      presentedContent: await presentedFrom(handle),
       gateCheck: realGate(() => new Date(t)),
       putRecord: async () => { firedB = true; return { uri: 'x', cid: 'x' }; },
       identity: { grantorDID: TEST_DID, targetDID: TEST_DID, identityCustodyClass: 'provider-custodied' },

@@ -8,7 +8,10 @@ import { createHash } from 'node:crypto';
 export interface CrossingSourceContent {
   title: string;
   content: string;
-  createdAt?: string; // ISO timestamp
+  /** ISO timestamp. Absent, undefined, and null all serialize as null
+   *  (Item 3.1: an assembled content object carries null when no input
+   *  had a createdAt — D-5). */
+  createdAt?: string | null;
 }
 
 /**

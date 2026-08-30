@@ -9,6 +9,16 @@
  *   UFO_Lexicon_v2_0 (substrate-crossing PROPOSED cluster; C2 host-object
  *     correction queued — host = intent record per KL-8c / SL-0114)
  *
+ * Item 3.1 (Run 6, 2026-08-29) — uniform assembly path under D-1 r2 / D-5:
+ *   every crossing assembles its content from ≥1 granted input document,
+ *   gates each input on `access.isReader` (D-4), compares the presented
+ *   payload's digest against the seam's own assembly by hash equality
+ *   (D-3), writes the assembled output to the assembly document the
+ *   crossing actor owns, and only then mints the intent there. A blocked
+ *   access or digest check leaves no assembly write and no record. The
+ *   intent record carries `sourceLineage` (one entry per input) and names
+ *   the assembly document as its singular source. Brief v0.1.2 §3.
+ *
  * Architectural invariant (record-before-crossing / write-before-fire):
  *   the intent record is written to the local Automerge document and
  *   confirmed readable BEFORE putRecord() fires. The crossing does not
@@ -18,6 +28,17 @@
  */
 
 import { createHash } from 'node:crypto';
+import type { CrossingSourceContent } from './digest.js';
+import {
+  assembleCrossingContent,
+  assembledContentDigest,
+  buildSourceLineage,
+  validateSourceLineage,
+  type AssemblyInput,
+  type SourceLineageEntry,
+} from './assembly.js';
+
+export type { SourceLineageEntry } from './assembly.js';
 
 // ---------------------------------------------------------------------------
 // Schema — PC#8 spec v0.1.3, with identity binding block per spec
@@ -51,8 +72,17 @@ export interface CrossingIntentRecord {
    * by this field (Q6 lock: lineageAnchorType remains author-declared).
    */
   sourceDocumentCID: string;
-  /** Content hash bound at grant time (CP-F11). */
+  /** Content hash bound at grant time (CP-F11). From Run 6: computed over
+   *  the assembly document's content object (D-3 / D-5). */
   authorizedContentDigest: string;
+  /**
+   * Item 3.1 (D-5): ordered lineage of the granted input documents the
+   * assembled content was built from — one entry per input in fixed
+   * aggregation order. Required, non-empty, from Run 6 (uniform path).
+   * Lineage digests are informational; the binding digest is
+   * `authorizedContentDigest` (D-3).
+   */
+  sourceLineage: SourceLineageEntry[];
 
   // Crossing fields
   targetLexicon: 'com.whtwnd.blog.entry';
@@ -107,6 +137,7 @@ export const REQUIRED_FIELDS: (keyof CrossingIntentRecord)[] = [
   'recordType', 'governanceEvent', 'boundType',
   'grantorDID', 'targetDID', 'identityCustodyClass',
   'sourceDocumentURI', 'sourceDocumentCID', 'authorizedContentDigest',
+  'sourceLineage',
   'targetLexicon', 'targetPDS', 'crossingType',
   'regimeAcknowledgment', 'declaredBoundType', 'recallSemantics',
   'crossingTimeoutHorizon', 'lineageAnchorType', 'emittedAt',
@@ -146,6 +177,9 @@ export function validateCrossingIntentRecord(
   ) {
     errors.push(`identityCustodyClass not in CV: ${rec.identityCustodyClass}`);
   }
+  if (rec.sourceLineage !== undefined && rec.sourceLineage !== null) {
+    errors.push(...validateSourceLineage(rec.sourceLineage));
+  }
   for (const f of ['crossingTimeoutHorizon', 'emittedAt', 'gateCheckedAt'] as const) {
     const v = rec[f];
     if (typeof v === 'string' && v !== '' && Number.isNaN(Date.parse(v))) {
@@ -160,9 +194,9 @@ export function validateCrossingIntentRecord(
 // ---------------------------------------------------------------------------
 
 export function computeAuthorizedContentDigest(content: {
-  title: string; content: string; createdAt: string;
+  title: string; content: string; createdAt: string | null | undefined;
 }): string {
-  const canonical = JSON.stringify([content.title, content.content, content.createdAt]);
+  const canonical = JSON.stringify([content.title, content.content, content.createdAt ?? null]);
   return createHash('sha256').update(canonical).digest('hex');
 }
 
@@ -175,12 +209,25 @@ export interface GateCheckResult {
   grantReference: string | null;
   gateCheckedAt: string;
   reason?: string;
+  /** Item 3.1 (D-4): the access level actually held, as `Access.toString()`
+   *  (`Read` | `Edit` | `Admin`), so `grantReference` names it. */
+  access?: string;
+  /** Item 3.1 (S2 B-7): the document the check was evaluated for — on a
+   *  block, the document that failed, so the log names it without the
+   *  runner reconstructing it. */
+  documentURI?: string;
 }
 
-/** Gate check function: evaluates the Keyhive grant at act time.
- *  Injected so Item 1.1 tests wire the real accessForDoc() check and
- *  Item 1.2+ reuses the same seam. */
-export type GateCheckFn = () => Promise<GateCheckResult>;
+/** The input a per-document gate check is evaluated for. */
+export interface GateCheckInput {
+  documentURI: string;
+}
+
+/** Gate check function: evaluates the Keyhive grant at act time, per input
+ *  document (Item 3.1 / D-4: pass iff `access.isReader`). Injected so tests
+ *  wire the real accessForDoc() check and the runner reuses the seam.
+ *  Called once per input in fixed order; the first block stops the gate. */
+export type GateCheckFn = (input: GateCheckInput) => Promise<GateCheckResult>;
 
 /** Injected publish call. Item 1.1 instruments ordering; Item 1.2 wires
  *  the live @atproto/api putRecord(). Item 1.4: the minted intent record
@@ -203,6 +250,11 @@ export type CrossingEvent =
   | 'gate-check-started'
   | 'gate-check-pass'
   | 'gate-check-blocked'
+  // Item 3.1 — assembly and digest check precede any assembly-document write
+  | 'assembly-completed'
+  | 'digest-check-pass'
+  | 'digest-check-blocked'
+  | 'assembly-document-written'
   | 'intent-record-written'
   | 'intent-record-read-confirmed'
   | 'timeout-horizon-expired'
@@ -226,19 +278,36 @@ export interface CrossingLogEntry {
 export interface CrossingDocShape {
   title: string;
   content: string;
-  createdAt: string;
+  /** Null when no input carried a createdAt (D-5 rule). */
+  createdAt: string | null;
   crossingRecords?: CrossingIntentRecord[];
 }
 
+/** A granted input document as the seam reads it (read-only surface). */
+export interface CrossingInputHandle {
+  doc(): Promise<CrossingSourceContent> | CrossingSourceContent;
+  heads?(): string[] | undefined;
+  url: string;
+}
+
 export interface InitiateCrossingParams {
-  /** Automerge document handle (from repo.create2 / repo.find). Must expose
-   *  change() and doc() in the automerge-repo handle shape. */
+  /** Item 3.1: the granted input documents, in fixed aggregation order.
+   *  Each is gated (step 1) before any of them is read (step 2). ≥1. */
+  inputs: CrossingInputHandle[];
+  /** The assembly document handle (D-5): created and owned by the crossing
+   *  actor before this call; the seam writes the assembled output to it
+   *  (step 4) and hosts the crossing records there. Must expose change()
+   *  and doc() in the automerge-repo handle shape. */
   handle: {
     change(fn: (d: CrossingDocShape) => void): void;
     doc(): Promise<CrossingDocShape> | CrossingDocShape;
     heads?(): string[] | undefined;
     url: string;
   };
+  /** The content the caller presents for crossing — what will be published.
+   *  Step 3 compares its digest, by hash equality, against the seam's own
+   *  assembly from `inputs`; mismatch blocks with nothing written. */
+  presentedContent: CrossingSourceContent;
   gateCheck: GateCheckFn;
   putRecord: PutRecordFn;
   identity: {
@@ -256,24 +325,29 @@ export interface InitiateCrossingParams {
 export type CrossingOutcome =
   | { status: 'fired'; intent: CrossingIntentRecord; put: { uri: string; cid: string }; log: CrossingLogEntry[] }
   | { status: 'gate-blocked'; reason: string; log: CrossingLogEntry[] }
+  | { status: 'digest-blocked'; reason: string; log: CrossingLogEntry[] }
   | { status: 'horizon-expired'; reason: string; log: CrossingLogEntry[] };
 
 /**
  * Executes one governed crossing attempt under the write-before-fire
- * discipline:
+ * discipline. Order (CONVENTIONS v0.2 §Gate; brief v0.1.2 §3):
  *
- *   1. Gate check (act-time-current; KL-8a). Blocked → stop; NO intent
- *      record is minted.
- *   2. crossingTimeoutHorizon check. Already expired → stop; no intent
- *      record, no fire (a record born expired would be born-dead; KL-8a
- *      requires a fresh gate pass with a fresh horizon).
- *   3. Mint the intent record; write it to the Automerge document.
- *   4. Read the document back and confirm the record is present
- *      (the invariant is confirmed-readable, not merely change()-called).
- *   5. Re-check the horizon at fire time; expired → do not fire
- *      (intent record remains; state reads crossing-unconfirmed at
- *      horizon elapse per the failure taxonomy).
- *   6. Fire putRecord().
+ *   1. Access check, per input document, fixed order (D-4: `isReader`).
+ *      Blocked → stop; NO assembly write, NO intent record; the block
+ *      names the document.
+ *   2. Assemble the content object from the granted inputs (D-3 / D-5).
+ *   3. Digest check: authorizedContentDigest over the assembly vs. over the
+ *      presented content, hash equality only. Mismatch → stop; nothing
+ *      written (no orphan assembly document).
+ *   4. Write the assembled output to the assembly document; recompute the
+ *      digest over the document's content object — inequality is a seam
+ *      fault (thrown), not a gate block.
+ *   5. crossingTimeoutHorizon must be in the future at mint (KL-8a).
+ *   6. Mint the intent record into the assembly document's crossingRecords
+ *      (sourceDocumentURI/CID = assembly document; sourceLineage = inputs).
+ *   7. Read back; confirm present.
+ *   8. Re-check the horizon at fire; expired → do not fire.
+ *   9. Fire putRecord(intent).
  */
 export async function initiateCrossing(
   p: InitiateCrossingParams,
@@ -283,16 +357,67 @@ export async function initiateCrossing(
   const stamp = (event: CrossingEvent, detail?: string) =>
     log.push({ event, at: clock().toISOString(), detail });
 
-  // 1 — gate check
-  stamp('gate-check-started');
-  const gate = await p.gateCheck();
-  if (gate.result !== 'pass' || !gate.grantReference) {
-    stamp('gate-check-blocked', gate.reason ?? 'gate blocked');
-    return { status: 'gate-blocked', reason: gate.reason ?? 'gate blocked', log };
+  if (p.inputs.length === 0) {
+    throw new Error('initiateCrossing requires at least one input document (uniform assembly path)');
   }
-  stamp('gate-check-pass', gate.grantReference);
 
-  // 2 — horizon must be in the future at mint time
+  // 1 — access check, per input, fixed order; first block stops
+  stamp('gate-check-started', `${p.inputs.length} input(s)`);
+  const gates: GateCheckResult[] = [];
+  for (const input of p.inputs) {
+    const gate = await p.gateCheck({ documentURI: input.url });
+    if (gate.result !== 'pass' || !gate.grantReference) {
+      const failed = gate.documentURI ?? input.url;
+      const reason = `${gate.reason ?? 'gate blocked'} [${failed}]`;
+      stamp('gate-check-blocked', reason);
+      return { status: 'gate-blocked', reason, log };
+    }
+    stamp('gate-check-pass', `${input.url} ${gate.access ?? ''}`.trim());
+    gates.push(gate);
+  }
+  // grantReference on the record is the first input's (fixed order); every
+  // input's reference and level is in the log above.
+  const firstGate = gates[0];
+
+  // 2 — assemble from the granted inputs (read only after all gates pass)
+  const assemblyInputs: AssemblyInput[] = [];
+  for (const input of p.inputs) {
+    const content = await input.doc();
+    assemblyInputs.push({
+      documentURI: input.url,
+      documentCID: input.heads?.()?.join(',') ?? 'heads-unavailable',
+      content: { title: content.title, content: content.content, createdAt: content.createdAt },
+    });
+  }
+  const assembled = assembleCrossingContent(assemblyInputs.map((i) => i.content));
+  const assembledDigest = assembledContentDigest(assembled);
+  stamp('assembly-completed', assembledDigest);
+
+  // 3 — digest check: presented payload vs. the seam's own assembly (hash equality only)
+  const presentedDigest = assembledContentDigest(p.presentedContent);
+  if (presentedDigest !== assembledDigest) {
+    const reason = `presented content digest ${presentedDigest} != assembled authorized digest ${assembledDigest}; no assembly document written, no intent record`;
+    stamp('digest-check-blocked', reason);
+    return { status: 'digest-blocked', reason, log };
+  }
+  stamp('digest-check-pass', assembledDigest);
+
+  // 4 — write the assembled output to the assembly document; recompute
+  p.handle.change((d) => {
+    d.title = assembled.title;
+    d.content = assembled.content;
+    d.createdAt = assembled.createdAt;
+  });
+  const docNow = await p.handle.doc();
+  const writtenDigest = computeAuthorizedContentDigest(docNow);
+  if (writtenDigest !== assembledDigest) {
+    throw new Error(
+      `seam fault: assembly document content digest ${writtenDigest} != assembled digest ${assembledDigest} after write`,
+    );
+  }
+  stamp('assembly-document-written', writtenDigest);
+
+  // 5 — horizon must be in the future at mint time
   const horizonMs = Date.parse(p.crossingTimeoutHorizon);
   if (Number.isNaN(horizonMs) || clock().getTime() >= horizonMs) {
     stamp('timeout-horizon-expired', 'expired at mint time; no intent record minted');
@@ -303,8 +428,7 @@ export async function initiateCrossing(
     };
   }
 
-  // 3 — mint + write the intent record
-  const docNow = await p.handle.doc();
+  // 6 — mint + write the intent record into the assembly document
   const heads = p.handle.heads?.();
   const intent: CrossingIntentRecord = {
     recordType: 'crossing-intent',
@@ -315,7 +439,8 @@ export async function initiateCrossing(
     identityCustodyClass: p.identity.identityCustodyClass,
     sourceDocumentURI: p.handle.url,
     sourceDocumentCID: heads?.join(',') ?? 'heads-unavailable',
-    authorizedContentDigest: computeAuthorizedContentDigest(docNow),
+    authorizedContentDigest: writtenDigest,
+    sourceLineage: buildSourceLineage(assemblyInputs),
     targetLexicon: 'com.whtwnd.blog.entry',
     targetPDS: p.targetPDS,
     crossingType: 'publication',
@@ -325,9 +450,9 @@ export async function initiateCrossing(
     crossingTimeoutHorizon: p.crossingTimeoutHorizon,
     lineageAnchorType: 'author-declared',
     emittedAt: clock().toISOString(),
-    grantReference: gate.grantReference,
+    grantReference: firstGate.grantReference!,
     gateResult: 'pass',
-    gateCheckedAt: gate.gateCheckedAt,
+    gateCheckedAt: firstGate.gateCheckedAt,
   };
 
   const validation = validateCrossingIntentRecord(intent);
@@ -342,7 +467,7 @@ export async function initiateCrossing(
   });
   stamp('intent-record-written');
 
-  // 4 — confirm readable
+  // 7 — confirm readable
   const readBack = await p.handle.doc();
   const found = (readBack.crossingRecords ?? []).some(
     (r) => r.recordType === 'crossing-intent' && r.emittedAt === intent.emittedAt,
@@ -352,7 +477,7 @@ export async function initiateCrossing(
   }
   stamp('intent-record-read-confirmed');
 
-  // 5 — horizon re-check at fire time
+  // 8 — horizon re-check at fire time
   if (clock().getTime() >= horizonMs) {
     stamp('timeout-horizon-expired', 'expired between mint and fire; putRecord not fired');
     return {
@@ -362,7 +487,7 @@ export async function initiateCrossing(
     };
   }
 
-  // 6 — fire (the minted intent travels with the fire — Item 1.4)
+  // 9 — fire (the minted intent travels with the fire — Item 1.4)
   stamp('put-record-fired');
   const put = await p.putRecord(intent);
   stamp('put-record-accepted', put.cid);

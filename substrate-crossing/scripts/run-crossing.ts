@@ -1,57 +1,102 @@
 /**
- * PC#8 Phase 1, Items 1.2 + 1.3 + 1.4 — Operator-run instrumented governed
- * crossing, completion-capable, back-pointer-carrying.
+ * PC#8 — Operator-run instrumented governed crossing.
+ * Phase 1 Items 1.2 + 1.3 + 1.4 (Runs 1–5); Phase 3 Item 3.1 (Run 6+).
  *
  * OPERATOR-RUN: requires live network access to bsky.social and Jetstream,
  * which the authoring container does not have (same split as Item 0.2).
  *
  *   cp .env.example .env    # PDS_HANDLE + PDS_APP_PASSWORD (Item 0.2 creds)
- *   npm run run:crossing -- --run 4
+ *   npm run run:crossing -- --run 6 --scenario public-subset
  *
  * Flags:
  *   --run N           Run number for the H.3 entry (default 1). Check the
  *                     canonical observation log's tail before choosing N.
- *   --scenario S      baseline | failed (default baseline). `failed` fires
- *                     against an invalid collection to force a reject —
- *                     the AC-1.5 simulated-failure posture (intent present,
- *                     no completion, error logged). NOTE (A7 ~): the reject
- *                     is @atproto/api CLIENT-side NSID validation; the
- *                     request never reaches the PDS.
+ *   --scenario S      baseline | failed | public-subset (default baseline).
+ *                     `failed` fires against an invalid collection to force a
+ *                     reject — the AC-1.5 simulated-failure posture. NOTE
+ *                     (A7 ~): the reject is @atproto/api CLIENT-side NSID
+ *                     validation; the request never reaches the PDS.
+ *                     `public-subset` is Item 3.1 / Run 6 — three legs in one
+ *                     invocation (see below).
  *   --horizon-s N     crossingTimeoutHorizon = now + N seconds (default 120).
+ *   --read-wait-ms N  Bounded wait for the actor's repo to obtain each
+ *                     granted input (default 15000), inclusive of the
+ *                     membership-visible wait (spike D-4). Elapsed →
+ *                     phase3_finding and abort; there is no fallback to the
+ *                     author's handle (operator ruling S4, 2026-08-29).
+ *   --ungranted-probe-ms N
+ *                     Bounded actor-side find() on the un-granted section_c
+ *                     (default 6000; spike D-5 — it never resolves). The
+ *                     negative leg then presents section_c to the gate by ID.
  *
- * What this run IS: a real governed crossing — Keyhive gate over a real
- * grant, intent record minted and confirmed document-resident, live
- * publish, PDS-accept + relay-ingest timing captured, §H.3 entry emitted
- * to docs/run-N-entry_<date>.md (NOT appended to the canonical log —
- * delivery-not-application holds for machine-emitted entries; paste it in
- * by hand).
+ * ITEM 3.1 (Run 6) — uniform assembly path (brief v0.1.3 §3; D-1 r2, D-4, D-5):
+ *   The author and the crossing actor are TWO Keyhive individuals. The
+ *   author creates the content documents and grants the actor read on the
+ *   ones whose whole content is authorized to cross. The actor reads them
+ *   through ITS OWN repo, creates the assembly document it owns (creator
+ *   holds admin — confirmed at runtime, S4 spike), grants the author read on
+ *   it, and presents the assembled content for crossing. The seam gates each
+ *   input on `isReader` (evaluated on the ISSUER's hive — operator ruling 2:
+ *   that is where the grant's causal history is authoritative; the actor's
+ *   hive may lag), re-assembles independently, checks the presented digest
+ *   by hash equality, writes the assembled output to the assembly document,
+ *   and mints the intent there with `sourceLineage`. Every scenario,
+ *   `baseline` and `failed` included, goes through this path with one input.
  *
- * Item 1.4 (this session): the published com.whtwnd.blog.entry record
- * carries seamCrossingRef — the KL-2 back-pointer, derived at fire time
- * from the minted intent record (sourceDocumentURI, sourceDocumentCID
- * (heads), crossingIntentRef content address, authorizedContentDigest).
- * KL-8b: this is a FRESH governed crossing per run — new gate pass, new
- * intent, new published record. Run 2's record (3mteosxkzms27) is the
- * standing completion-arc evidence target: never deleted, never
- * retrofitted. After a successful publish, the record is fetched back via
- * com.atproto.repo.getRecord and the stored seamCrossingRef is checked
- * intact + digest-matched against the fired intent (build plan Item 1.4
- * acceptance). AppView surface/drop (whtwnd.com) is a manual operator
- * observation recorded in the KL-2 field of the H.3 entry; the deep
- * round-trip (firehose payload, AppView backing store) is Phase 2 Item 2.1.
+ *   `public-subset` legs, run in this order (each logs before the next):
+ *     negative    — actor presents [a, b, c]; step-1 access block on c
+ *                   (issuer's hive: accessForDoc undefined); no assembly
+ *                   write, no intent, no putRecord.
+ *     adversarial — actor presents [a, b] with foreign bytes appended to the
+ *                   presented content; step-3 digest block on hash
+ *                   inequality; nothing written.
+ *     positive    — actor presents [a, b]; fires; completion minted in the
+ *                   assembly document.
+ *   Order rationale: AC-3.1.3 requires the block event's timestamp to
+ *   precede any intent-record timestamp IN THE RUN; running the blocking
+ *   legs first makes that hold across the whole invocation, not only within
+ *   a leg. (Ruling R-A, brief v0.1.3 §8, operator-confirmed 2026-08-29.)
  *
- * NOTE: unlike the Phase 0 probes, the record published here IS a governed
- * crossing artifact — leave it in place until the KL-1/KL-2 evidence
- * artifact is produced (it is the completion/back-pointer target).
+ * TRANSPORT (D-6 r1; Item 3.1b spike, SL-0186): Run 6 runs on the ENCRYPTED
+ *   transport — `initializeAutomergeRepoKeyhive` (subduction), two hives
+ *   paired in-process over the PairNetworkAdapter supplied as
+ *   `repo.subductionAdapters`, `syncServer: 'none'`, no sync server. On this
+ *   transport a Keyhive read grant is enforced on sync: granted documents
+ *   decrypt on the actor's repo; an un-granted document's ciphertext
+ *   transits but never decrypts (find() pends to timeout, no error). The
+ *   legacy transport used by Runs 1–5 does NOT enforce read grants on sync
+ *   (F-P3-1, SL-0185) and is not used here.
+ *   Fixture consequences (spike record r1 §2):
+ *     D-4  a granted document is find()-able on the actor side only once the
+ *          actor's hive has learned its membership (~2 s); the runner waits
+ *          for actor.hive.accessForDoc(self, url) to be defined first.
+ *     D-5  the un-granted document never resolves; the probe is bounded and
+ *          the negative leg presents section_c to the gate by ID.
+ *     D-6  addMemberToDoc triggers the GRANTER's membership nudge write
+ *          (`__automerge-repo-keyhive__last-added-member-ts`) into the granted
+ *          document. Content documents a/b and every assembly document
+ *          (author granted read) carry it; c does not. The nudge is the
+ *          author-hive's write, not the actor's, and is outside the digested
+ *          content object; the nudge commit is visible in sourceLineage
+ *          documentCIDs and in sourceDocumentCID — recorded as an
+ *          observation, not a defect.
+ *
+ * NOTE: records published here ARE governed crossing artifacts — evidence
+ * targets, never deleted, never retrofitted.
  */
 import 'dotenv/config';
+import type { webcrypto } from 'node:crypto';
 import { AtpAgent } from '@atproto/api';
 import WebSocket from 'ws';
 import {
   initiateCrossing,
   type CrossingLogEntry,
+  type CrossingInputHandle,
+  type CrossingIntentRecord,
   type GateCheckFn,
 } from '../src/crossing-intent.js';
+import { assembleCrossingContent, type AssembledContent } from '../src/assembly.js';
+import type { CrossingSourceContent } from '../src/digest.js';
 import {
   makeTimedPutRecord,
   emptyTimings,
@@ -60,7 +105,13 @@ import {
   DEFAULT_JETSTREAM,
   type WhtwndEntryRecord,
 } from '../src/crossing-fire.js';
-import { buildH3Entry, renderH3Entry, writeH3EntryFile } from '../src/observation-log.js';
+import {
+  buildH3Entry,
+  renderH3Entry,
+  writeH3EntryFile,
+  type H3Scenario,
+  type H3Phase3Fields,
+} from '../src/observation-log.js';
 import {
   writeCrossingCompletion,
   deriveDocumentCrossingState,
@@ -71,13 +122,13 @@ import {
   type SeamCrossingRef,
 } from '../src/seam-crossing-ref.js';
 // Real Keyhive substrate — same wiring as item-0-3-baseline / Item 1.1 tests.
-import '@automerge/automerge';
+import { next as Automerge } from '@automerge/automerge';
 import '@automerge/automerge-subduction';
 import { Repo } from '@automerge/automerge-repo';
 import { DummyStorageAdapter } from '@automerge/automerge-repo/helpers/DummyStorageAdapter.js';
 import { PairNetworkAdapter } from '../test/helpers/pair-network-adapter.js';
 import {
-  initializeLegacyAutomergeRepoKeyhive,
+  initializeAutomergeRepoKeyhive,
   Access,
 } from '@automerge/automerge-repo-keyhive';
 
@@ -87,26 +138,372 @@ const APP_PASSWORD = process.env.PDS_APP_PASSWORD;
 // Item 1.2 default: jetstream1 (registered reliability finding). Overridable.
 const JETSTREAM = process.env.JETSTREAM_ENDPOINT ?? DEFAULT_JETSTREAM;
 const RELAY_TIMEOUT_MS = 60_000;
+const TAG = '[3.1]';
 
 function flag(name: string, fallback: string): string {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 
+type Scenario = 'baseline' | 'failed' | 'public-subset';
 const RUN_N = Number(flag('run', '1'));
-const SCENARIO = flag('scenario', 'baseline') as 'baseline' | 'failed';
+const SCENARIO = flag('scenario', 'baseline') as Scenario;
 const HORIZON_S = Number(flag('horizon-s', '120'));
+const READ_WAIT_MS = Number(flag('read-wait-ms', '15000'));
+const UNGRANTED_PROBE_MS = Number(flag('ungranted-probe-ms', '6000'));
 
 const ACK =
-  'I acknowledge that this crossing terminates seam-stack enforcement at the AT Protocol boundary; recall is a propagated request. (Operator-authored, Item 1.4 back-pointer-carrying run.)';
+  'I acknowledge that this crossing terminates seam-stack enforcement at the AT Protocol boundary; recall is a propagated request. (Operator-authored; Item 3.1 uniform-assembly-path run.)';
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// ---------------------------------------------------------------------------
+// Keyhive fixture helpers
+// ---------------------------------------------------------------------------
+
+type Hive = Awaited<ReturnType<typeof initializeAutomergeRepoKeyhive>>;
+
+type KeyPair = webcrypto.CryptoKeyPair;
+
+const PAIR_CONNECT_MS = 10_000;
+const SUBDUCTION_SERVICE = 'pc08-run6';
+
+/** Spike D-2: each hive is an extractable Ed25519 key pair minted by the
+ *  fixture so that both wire peer ids are known before either hive exists. */
+async function ed25519Pair(): Promise<KeyPair> {
+  return (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])) as unknown as KeyPair;
+}
+
+/** Keyhive peer id in wire form: base64 of the raw 32-byte public key, no
+ *  suffix (codec.ts#peerIdToSubduction strips any suffix). */
+async function wirePeerId(kp: KeyPair): Promise<string> {
+  const raw = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
+  return Buffer.from(raw).toString('base64');
+}
+
+/** Spike D-1 / D-3: two subduction hives paired in-process over the
+ *  PairNetworkAdapter via `repo.subductionAdapters` (roles accept/connect),
+ *  no sync server. Returns only after both sides report the subduction
+ *  connection. The actor's repo storage is returned so the un-granted probe
+ *  can scan it for plaintext. */
+async function makeHivePair(): Promise<{ author: Hive; actor: Hive; actorRepoStorage: DummyStorageAdapter }> {
+  const [authorNet, actorNet] = PairNetworkAdapter.createConnectedPair();
+  const [kpAuthor, kpActor] = await Promise.all([ed25519Pair(), ed25519Pair()]);
+  const [pidAuthor, pidActor] = await Promise.all([wirePeerId(kpAuthor), wirePeerId(kpActor)]);
+  const actorRepoStorage = new DummyStorageAdapter();
+  const mk = (kp: KeyPair, remote: string, adapter: PairNetworkAdapter, label: string, role: 'accept' | 'connect', repoStorage: DummyStorageAdapter) =>
+    initializeAutomergeRepoKeyhive({
+      storage: new DummyStorageAdapter(),
+      peerIdSuffix: label,
+      keyPair: kp as any,
+      syncServer: 'none',
+      remotePeerId: remote as any,
+      shareConfigDebounceMs: 0,
+      createRepo: (cfg: any) => new Repo(cfg),
+      repo: {
+        storage: repoStorage,
+        subductionAdapters: [{ adapter, serviceName: SUBDUCTION_SERVICE, role }],
+      },
+    });
+  const [author, actor] = await Promise.all([
+    mk(kpAuthor, pidActor, authorNet, 'pc08-run-author', 'accept', new DummyStorageAdapter()),
+    mk(kpActor, pidAuthor, actorNet, 'pc08-run-actor', 'connect', actorRepoStorage),
+  ]);
+  authorNet.peerCandidate(actorNet.peerId!);
+  actorNet.peerCandidate(authorNet.peerId!);
+  const deadline = Date.now() + PAIR_CONNECT_MS;
+  while (Date.now() < deadline) {
+    if ((author.repo as any).isSubductionConnected() && (actor.repo as any).isSubductionConnected()) break;
+    await sleep(100);
+  }
+  if (!(author.repo as any).isSubductionConnected() || !(actor.repo as any).isSubductionConnected()) {
+    throw new Error(`subduction pairing did not connect within ${PAIR_CONNECT_MS}ms`);
+  }
+  console.log(`${TAG} transport: initializeAutomergeRepoKeyhive + subduction, in-process pair, syncServer=none; both sides connected`);
+  return { author, actor, actorRepoStorage };
+}
+
+const NUDGE_FIELD = '__automerge-repo-keyhive__last-added-member-ts';
+
+/** Spike D-6 observation input: whether a document carries the granter's
+ *  membership nudge field. Read on whichever handle is given. */
+async function hasNudge(h: any): Promise<boolean> {
+  const d = await h.doc();
+  return !!d && Object.prototype.hasOwnProperty.call(d, NUDGE_FIELD);
+}
+
+
+/** Item 0.3 poll pattern: doc protection registers asynchronously. */
+async function grantWithPoll(hive: Hive, url: string, card: any, access: Access) {
+  for (let i = 0; i < 20; i++) {
+    try {
+      await hive.hive.addMemberToDoc(url as any, card, access);
+      return;
+    } catch (e: any) {
+      if (e?.name === 'UnprotectedDocError' || /unprotected/i.test(String(e))) {
+        await sleep(250);
+      } else throw e;
+    }
+  }
+  throw new Error(`doc never became keyhive-protected: ${url}`);
+}
+
+function hex(id: any): string {
+  return Buffer.from(id.toBytes()).toString('hex');
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`timeout:${label}`)), ms)),
+  ]);
+}
+
+function resync(actor: Hive, url: string) {
+  try { (actor.repo as any).resyncSubduction(url.replace(/^automerge:/, '') as any); } catch { /* best effort */ }
+}
+
+/** Spike D-4: on the encrypted transport, find() on a granted document
+ *  before the actor's hive has learned its membership returns `unavailable`
+ *  in ~25 ms. Wait until actor.hive.accessForDoc(self, url) is defined.
+ *  Returns the elapsed ms (membership-lag observation) or throws. */
+async function waitMembershipVisible(actor: Hive, url: string, waitMs: number): Promise<number> {
+  const self = actor.hive.active.individual.id;
+  const t0 = Date.now();
+  const deadline = t0 + waitMs;
+  while (Date.now() < deadline) {
+    const seen = await actor.hive.accessForDoc(self, url as any);
+    if (seen !== undefined && seen !== null) return Date.now() - t0;
+    await sleep(200);
+  }
+  throw new Error(`actor hive did not see its membership on ${url} within ${waitMs}ms`);
+}
+
+/** Bounded wait for the actor's repo to obtain a GRANTED document. Waits
+ *  for membership visibility first (D-4), then find() in resync rounds.
+ *  Resolves the handle only once its content object is readable; throws on
+ *  elapse. No fallback to the author's handle (operator ruling 1). */
+async function loadOnActor(actor: Hive, url: string, waitMs: number): Promise<{ handle: any; membershipLagMs: number }> {
+  const deadline = Date.now() + waitMs;
+  const membershipLagMs = await waitMembershipVisible(actor, url, waitMs);
+  let last = '';
+  while (Date.now() < deadline) {
+    const roundMs = Math.max(500, Math.min(3_000, deadline - Date.now()));
+    try {
+      const h: any = await withTimeout((actor.repo as any).find(url), roundMs, `find:${url}`);
+      const d: any = await withTimeout(h.doc(), roundMs, `doc:${url}`);
+      if (d && typeof d.title === 'string' && typeof d.content === 'string') return { handle: h, membershipLagMs };
+      last = 'content object not readable';
+    } catch (e: any) {
+      last = String(e?.message ?? e);
+      resync(actor, url);
+    }
+    await sleep(300);
+  }
+  throw new Error(`actor repo did not obtain readable ${url} within ${waitMs}ms (last: ${last})`);
+}
+
+/** Spike D-5: an actor-side find() on an UN-GRANTED document never resolves
+ *  on the encrypted transport — ciphertext transits, plaintext never
+ *  materialises. Bounded probe in resync rounds, then a scan of the actor's
+ *  repo storage for the document's plaintext with a granted document as the
+ *  positive control. Records; does not throw. */
+async function probeUngranted(
+  actor: Hive, actorRepoStorage: DummyStorageAdapter, url: string, plaintextMarkers: RegExp, controlMarkers: RegExp, waitMs: number,
+): Promise<{ obtained: boolean; decrypted: boolean; behaviour: string; storage: string }> {
+  const deadline = Date.now() + waitMs;
+  let obtained = false;
+  let decrypted = false;
+  let last = '';
+  let rounds = 0;
+  while (Date.now() < deadline) {
+    rounds++;
+    const roundMs = Math.max(500, Math.min(3_000, deadline - Date.now()));
+    try {
+      const h: any = await withTimeout((actor.repo as any).find(url), roundMs, `find:section_c`);
+      obtained = true;
+      const d: any = await withTimeout(h.doc(), roundMs, `doc:section_c`);
+      decrypted = !!d && typeof d.title === 'string';
+      last = `find resolved; doc() ${decrypted ? 'RETURNED PLAINTEXT' : 'returned no content object'}`;
+      break;
+    } catch (e: any) {
+      last = String(e?.message ?? e);
+      resync(actor, url);
+    }
+    await sleep(300);
+  }
+  const chunks = await actorRepoStorage.loadRange([]);
+  const dec = new TextDecoder('utf8', { fatal: false });
+  const docKey = url.replace(/^automerge:/, '');
+  let bytesUnderC = 0; let plainHits = 0; let controlHits = 0;
+  let plainHitsDecoded = 0; let controlHitsDecoded = 0; let loadable = 0;
+  for (const ch of chunks) {
+    if (!ch.data) continue;
+    const txt = dec.decode(ch.data);
+    if (plaintextMarkers.test(txt)) plainHits++;
+    if (controlMarkers.test(txt)) controlHits++;
+    try {
+      const decoded = JSON.stringify(Automerge.load(ch.data));
+      loadable++;
+      if (plaintextMarkers.test(decoded)) plainHitsDecoded++;
+      if (controlMarkers.test(decoded)) controlHitsDecoded++;
+    } catch {
+      /* not a loadable document chunk (incremental fragment, metadata, or ciphertext) */
+    }
+    if (ch.key.join('/').includes(docKey)) bytesUnderC += ch.data.byteLength;
+  }
+  return {
+    obtained,
+    decrypted: decrypted || plainHits > 0 || plainHitsDecoded > 0,
+    behaviour: `${rounds} round(s) over ${waitMs}ms: ${last}`,
+    storage: `actor repo storage: chunks=${chunks.length} (loadable=${loadable}), bytes under section_c=${bytesUnderC}, section_c plaintext hits raw/decoded=${plainHits}/${plainHitsDecoded}, control (section_a) plaintext hits raw/decoded=${controlHits}/${controlHitsDecoded} (raw scan cannot see deflated snapshot columns ≥256 B; decoded scan is the control of record)`,
+  };
+}
+
+function inputHandle(h: any): CrossingInputHandle {
+  return {
+    url: h.url,
+    doc: () => h.doc(),
+    heads: () => {
+      try { return h.heads?.(); } catch { return undefined; }
+    },
+  };
+}
+
+/** An input the actor could not load. The seam's step-1 gate is evaluated
+ *  on the URL before any doc() call, so the block site is accessForDoc(),
+ *  not handle load (brief §4 negative leg). */
+function unloadableInput(url: string, why: string): CrossingInputHandle {
+  return {
+    url,
+    doc: () => {
+      throw new Error(`doc() called on an input that should have been gated first: ${why}`);
+    },
+    heads: () => undefined,
+  };
+}
+
+/** Per-document gate on the ISSUER's hive (operator ruling 2): pass iff
+ *  the actor's individual holds `isReader` on that document (D-4).
+ *  `grantReference` names the level actually held. */
+function makeGate(author: Hive, actorIndividualId: any): GateCheckFn {
+  const actorHex = hex(actorIndividualId);
+  return async ({ documentURI }) => {
+    const access = await author.hive.accessForDoc(actorIndividualId, documentURI as any);
+    const at = new Date().toISOString();
+    if (access !== undefined && access !== null && access.isReader) {
+      const level = access.toString();
+      return {
+        result: 'pass',
+        grantReference: `keyhive:${actorHex}:${level.toLowerCase()}`,
+        gateCheckedAt: at,
+        access: level,
+        documentURI,
+      };
+    }
+    return {
+      result: 'blocked',
+      grantReference: null,
+      gateCheckedAt: at,
+      documentURI,
+      access: access ? access.toString() : undefined,
+      reason: access
+        ? `access level ${access.toString()} is below read (relay-level grant does not pass; D-4)`
+        : 'no authorizing grant present in causal history',
+    };
+  };
+}
+
+/** Creates the actor-owned assembly document and grants the author read on
+ *  it (D-5). Returns the handle and the membership read used as the
+ *  creator-admin confirmation input (operator ruling; S4 spike ✓). */
+async function makeAssemblyDoc(actor: Hive, author: Hive, label: string) {
+  const h = await (actor.repo as any).create2({ title: '', content: '', createdAt: null });
+  await grantWithPoll(actor, h.url, author.hive.active.contactCard, Access.read());
+  const selfAccess = await actor.hive.accessForDoc(actor.hive.active.individual.id, h.url);
+  const members = await actor.hive.listMembers(h.url);
+  const membership = members
+    .map((m: any) => `${m.id.slice(0, 12)}…:${m.access.toString()}${m.isSelf ? ' (self)' : ''}`)
+    .join(', ');
+  console.log(
+    `${TAG} assembly document (${label}) ${h.url}: creator accessForDoc=${selfAccess ? selfAccess.toString() : 'undefined'}; members: ${membership}`,
+  );
+  return { handle: h, creatorAccess: selfAccess ? selfAccess.toString() : 'undefined', membership };
+}
+
+/** "Untouched" is a test of the CONTENT OBJECT and the record arrays, not
+ *  of field absence. The author's read grant on the assembly document
+ *  (makeAssemblyDoc, before any leg) triggers the granter's membership
+ *  nudge write (`__automerge-repo-keyhive__last-added-member-ts`, spike
+ *  D-6) into the assembly document; that field is transport residue, not a
+ *  seam write, and must not be read as an orphan write. (Operator, S6 Unit B.) */
+function assemblyDocIsUntouched(doc: CompletionDocShape): boolean {
+  return (
+    doc.title === '' && doc.content === '' &&
+    (doc.crossingRecords ?? []).length === 0 &&
+    (doc.completionRecords ?? []).length === 0
+  );
+}
+
+function fmtLog(log: CrossingLogEntry[]): string[] {
+  return log.map((l) => `       ${l.at}  ${l.event}${l.detail ? `  (${l.detail})` : ''}`);
+}
+
+/** phase3_* fields: required from Run 6 (buildH3Entry enforces); for earlier
+ *  run numbers on baseline/failed they are omitted → n/a. */
+function phase3Fields(scenario: Scenario, gateObs: string[], findings: string[]): H3Phase3Fields | undefined {
+  if (RUN_N < 6 && scenario !== 'public-subset') return undefined;
+  return {
+    pattern: 'public-subset',
+    gateObservation: gateObs.join(' | '),
+    finding: findings.join(' | '),
+  };
+}
+
+async function emitEntry(p: {
+  outcome: 'completed' | 'failed' | 'timeout'; scenario: Scenario; log: CrossingLogEntry[];
+  intentEmittedAt: string | null; timings: ReturnType<typeof emptyTimings>;
+  relayIngestedAt: string | null; completionWrittenAt: string | null;
+  kl1: string; kl2: string; phase3: H3Phase3Fields | undefined;
+}) {
+  const entry = buildH3Entry({
+    runNumber: RUN_N,
+    scenario: p.scenario as H3Scenario,
+    crossingLog: p.log,
+    intentEmittedAt: p.intentEmittedAt,
+    putRecordCalledAt: p.timings.putRecordCalledAt,
+    pdsAcceptedAt: p.timings.pdsAcceptedAt,
+    relayIngestedAt: p.relayIngestedAt,
+    completionWrittenAt: p.completionWrittenAt,
+    crossingOutcome: p.outcome,
+    kl1Observation: p.kl1,
+    kl2Observation: p.kl2,
+    phase3: p.phase3,
+  });
+  const label = p.scenario === 'public-subset'
+    ? 'Item 3.1 public-subset crossing (negative → adversarial → positive)'
+    : `Item 3.1 uniform-assembly-path run (${p.scenario})`;
+  console.log('\n' + renderH3Entry(entry, label));
+  const outPath = writeH3EntryFile(entry, { runLabel: label });
+  console.log(`${TAG} H.3 entry written to ${outPath}`);
+  console.log(`${TAG} Paste the block into docs/observation-log-pc08.md by hand (append-only).`);
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
 
 async function main() {
   if (!HANDLE || !APP_PASSWORD) {
-    console.error('[1.4] Missing PDS_HANDLE / PDS_APP_PASSWORD in .env');
+    console.error(`${TAG} Missing PDS_HANDLE / PDS_APP_PASSWORD in .env`);
     process.exit(1);
   }
   if (!Number.isInteger(RUN_N) || RUN_N < 1) {
-    console.error('[1.4] --run must be a positive integer');
+    console.error(`${TAG} --run must be a positive integer`);
+    process.exit(1);
+  }
+  if (!['baseline', 'failed', 'public-subset'].includes(SCENARIO)) {
+    console.error(`${TAG} --scenario must be baseline | failed | public-subset`);
     process.exit(1);
   }
 
@@ -114,74 +511,111 @@ async function main() {
   const agent = new AtpAgent({ service: PDS_SERVICE });
   await agent.login({ identifier: HANDLE, password: APP_PASSWORD });
   const did = agent.session!.did;
-  console.log(`[1.4] createSession() OK did=${did}`);
+  console.log(`${TAG} createSession() OK did=${did}`);
 
-  // --- 1. Local Keyhive substrate: doc + real grant (Item 0.3 pattern) ---
-  const [ownerNet, actorNet] = PairNetworkAdapter.createConnectedPair();
-  const mk = (adapter: any, label: string) =>
-    initializeLegacyAutomergeRepoKeyhive({
-      storage: new DummyStorageAdapter(),
-      peerIdSuffix: label,
-      networkAdapter: adapter,
-      syncServer: 'none',
-      createRepo: (cfg: any) => new Repo(cfg),
-    });
-  const [owner, actor] = await Promise.all([
-    mk(ownerNet, 'pc08-run-owner'),
-    mk(actorNet, 'pc08-run-actor'),
-  ]);
-  ownerNet.peerCandidate(actorNet.peerId!);
-  actorNet.peerCandidate(ownerNet.peerId!);
+  // --- 1. Two Keyhive individuals: author and crossing actor ---
+  const { author, actor, actorRepoStorage } = await makeHivePair();
+  const actorCard = actor.hive.active.contactCard;
+  const actorIndividual = await author.hive.receiveContactCard(actorCard);
+  if (!actorIndividual) throw new Error('author could not resolve the actor individual from its contact card');
+  const actorId = actorIndividual.id;
+  console.log(`${TAG} author individual ${hex(author.hive.active.individual.id).slice(0, 12)}…; actor individual ${hex(actorId).slice(0, 12)}…`);
+  const gate = makeGate(author, actorId);
 
-  const content = {
-    title: `PC#8 governed crossing — Run ${RUN_N}`,
+  // Content documents: the author creates them; grants are per document.
+  const stamp = new Date().toISOString();
+  const mkSection = (name: string, authorized: boolean) => ({
+    title: `PC#8 governed crossing — Run ${RUN_N} — ${name}`,
     content: [
-      '# Substrate-crossing seam — instrumented governed crossing',
+      `# ${name}`,
       '',
-      `Run ${RUN_N} (${SCENARIO}). Published under a Keyhive-gated`,
-      'crossing-intent record per PC#8 v0.1.3 (write-before-fire).',
-      'This record carries a seamCrossingRef back-pointer (Item 1.4 /',
-      'KL-2) referencing the governed Automerge source document.',
-      'This record is a KL-1/KL-2 evidence target — do not delete until',
-      'the closing-evidence artifact is produced.',
+      `Run ${RUN_N} (${SCENARIO}). ${authorized ? 'Authorized to cross.' : 'NOT authorized to cross; no grant to the crossing actor.'}`,
+      'Published under a Keyhive-gated crossing-intent record per PC#8 v0.1.3',
+      '(write-before-fire), assembled by the crossing actor from granted',
+      'input documents (Item 3.1, D-1 r2 / D-5). Evidence target — do not delete.',
     ].join('\n'),
-    createdAt: new Date().toISOString(),
-  };
-  const handle = await (owner.repo as any).create2(content);
-  const card = actor.hive.active.contactCard;
-  const individual = await owner.hive.receiveContactCard(card);
-  // Item 0.3 poll pattern: doc protection registers asynchronously.
-  let granted = false;
-  for (let i = 0; i < 20 && !granted; i++) {
-    try {
-      await owner.hive.addMemberToDoc(handle.url, card, Access.read());
-      granted = true;
-    } catch (e: any) {
-      if (e?.name === 'UnprotectedDocError' || /unprotected/i.test(String(e))) {
-        await new Promise((r) => setTimeout(r, 250));
-      } else throw e;
+    createdAt: stamp,
+  });
+
+  const findings: string[] = [];
+  const gateObservations: string[] = [];
+  const allLogs: { leg: string; log: CrossingLogEntry[] }[] = [];
+
+  let sectionA: any, sectionB: any = null, sectionC: any = null;
+  if (SCENARIO === 'public-subset') {
+    sectionA = await (author.repo as any).create2(mkSection('section_a', true));
+    sectionB = await (author.repo as any).create2(mkSection('section_b', true));
+    sectionC = await (author.repo as any).create2(mkSection('section_c', false));
+    await grantWithPoll(author, sectionA.url, actorCard, Access.read());
+    await grantWithPoll(author, sectionB.url, actorCard, Access.read());
+    // section_c: NO grant.
+    for (const [n, h] of [['section_a', sectionA], ['section_b', sectionB], ['section_c', sectionC]] as const) {
+      const a = await author.hive.accessForDoc(actorId, h.url);
+      console.log(`${TAG} issuer accessForDoc(actor, ${n}) = ${a ? a.toString() : 'undefined'}  ${h.url}`);
     }
+  } else {
+    sectionA = await (author.repo as any).create2(mkSection('single-source', true));
+    await grantWithPoll(author, sectionA.url, actorCard, Access.read());
+    console.log(`${TAG} single input granted read: ${sectionA.url}`);
   }
-  if (!granted) throw new Error('doc never became keyhive-protected');
-  console.log('[1.4] Keyhive doc + read grant established:', handle.url);
 
-  const gate: GateCheckFn = async () => {
-    const access = await owner.hive.accessForDoc(individual!.id, handle.url);
-    return access !== undefined
-      ? {
-          result: 'pass',
-          grantReference: `keyhive:${Buffer.from(individual!.id.toBytes()).toString('hex')}:read`,
-          gateCheckedAt: new Date().toISOString(),
-        }
-      : {
-          result: 'blocked',
-          grantReference: null,
-          gateCheckedAt: new Date().toISOString(),
-          reason: 'no authorizing grant present in causal history',
-        };
-  };
+  // --- 2. Actor-side reads of the granted inputs (bounded; no fallback) ---
+  let actorA: any, actorB: any = null;
+  try {
+    const rA = await loadOnActor(actor, sectionA.url, READ_WAIT_MS);
+    actorA = rA.handle;
+    let lag = `section_a ${rA.membershipLagMs}ms`;
+    if (sectionB) {
+      const rB = await loadOnActor(actor, sectionB.url, READ_WAIT_MS);
+      actorB = rB.handle;
+      lag += `, section_b ${rB.membershipLagMs}ms`;
+    }
+    findings.push(`Membership lag (spike D-4; fixture timing, not a gate): actor's hive saw its read grant after ${lag}; actor-side find() succeeded after the wait.`);
+    console.log(`${TAG} membership lag: ${lag}`);
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    console.error(`${TAG} ABORT — actor could not obtain a granted input: ${msg}`);
+    findings.push(`Actor-side read of a GRANTED input failed (${msg}); run aborted without fallback to the author's handle (operator ruling 1). S2 B-1 territory.`);
+    await emitEntry({
+      outcome: 'failed', scenario: SCENARIO, log: [], intentEmittedAt: null, timings: emptyTimings(),
+      relayIngestedAt: null, completionWrittenAt: null,
+      kl1: 'Run aborted before any crossing attempt: actor could not obtain a granted input document.',
+      kl2: 'n/a — nothing crossed.',
+      phase3: phase3Fields(SCENARIO, gateObservations, findings),
+    });
+    process.exit(1);
+  }
+  console.log(`${TAG} actor obtained granted input(s) through its own repo`);
 
-  // --- 2. Relay watcher open BEFORE the fire ---
+  // Un-granted probe (spike D-5; AC-3.1.2 capability half): section_c must
+  // not be decryptable by the actor on this transport. Ciphertext may
+  // transit; plaintext must not materialise. Recorded verbatim either way.
+  let cProbeBehaviour = 'n/a';
+  if (sectionC) {
+    const p = await probeUngranted(
+      actor, actorRepoStorage, sectionC.url,
+      /section_c|NOT authorized to cross/,
+      /section_a/,
+      UNGRANTED_PROBE_MS,
+    );
+    cProbeBehaviour = p.behaviour;
+    const probe = p.decrypted
+      ? `section_c (no grant) DECRYPTED on the actor's repo (${p.behaviour}; ${p.storage}) — contradicts SL-0186 on this transport; AC-3.1.2 capability half NOT met; investigate before closing Item 3.1.`
+      : `section_c (no grant) not decryptable by the actor: ${p.obtained ? 'handle obtained but no content object' : 'handle pending at timeout'} (${p.behaviour}); ${p.storage}. Ciphertext transits; plaintext does not (spike Q2, SL-0186). Evidence file: substrate-crossing/test/spike/spike-3-1b-encrypted-transport.test.ts.`;
+    console.log(`${TAG} un-granted probe: ${probe}`);
+    findings.push(probe);
+    if (p.decrypted) console.error(`${TAG} AC-3.1.2 capability half NOT met — see finding`);
+  }
+
+  // Spike D-6 observation: the granter's membership nudge write on granted documents.
+  if (sectionC) {
+    const nA = await hasNudge(sectionA); const nB = await hasNudge(sectionB); const nC = await hasNudge(sectionC);
+    const obs = `Membership nudge (spike D-6, author-hive write, not a seam write): ${NUDGE_FIELD} present on section_a=${nA}, section_b=${nB}, section_c=${nC} (expected true/true/false). Content object {title, content, createdAt} unaffected; nudge commit is included in the lineage documentCIDs read post-grant — observation, not defect.`;
+    console.log(`${TAG} ${obs}`);
+    findings.push(obs);
+  }
+
+  // --- 3. Relay watcher open BEFORE any fire ---
   const watcher = new JetstreamWatcher({
     endpoint: JETSTREAM,
     did,
@@ -189,19 +623,111 @@ async function main() {
     wsFactory: (url) => new WebSocket(url) as any,
   });
   await watcher.start();
-  console.log(`[1.4] relay subscription open: ${JETSTREAM} (client-side DID+collection filter)`);
+  console.log(`${TAG} relay subscription open: ${JETSTREAM} (client-side DID+collection filter)`);
 
-  // --- 3. Timed live publish (the injected PutRecordFn seam) ---
+  const grantedInputs: CrossingInputHandle[] = sectionB
+    ? [inputHandle(actorA), inputHandle(actorB)]
+    : [inputHandle(actorA)];
+  const grantedContents: CrossingSourceContent[] = [];
+  for (const h of grantedInputs) {
+    const d = await h.doc();
+    grantedContents.push({ title: d.title, content: d.content, createdAt: d.createdAt });
+  }
+  // The actor's own assembly — what it PRESENTS. The seam re-assembles
+  // independently and compares by hash (operator ruling 4).
+  const assembled: AssembledContent = assembleCrossingContent(grantedContents);
+  if (assembled.createdAt === null) {
+    throw new Error('fixture inputs carry createdAt; a null assembled createdAt is unexpected here');
+  }
+  const presented = { title: assembled.title, content: assembled.content, createdAt: assembled.createdAt };
+
+  const identity = { grantorDID: did, targetDID: did, identityCustodyClass: 'provider-custodied' as const };
+  const horizonFor = () => new Date(Date.now() + HORIZON_S * 1000).toISOString();
+  const neverFire = async () => {
+    throw new Error('putRecord must not be called on a blocked leg');
+  };
+
+  // --- 4a. public-subset: NEGATIVE leg (access-layer block on section_c) ---
+  if (SCENARIO === 'public-subset') {
+    const asmNeg = await makeAssemblyDoc(actor, author, 'negative leg');
+    findings.push(`Assembly document creator access (negative leg): accessForDoc(self)=${asmNeg.creatorAccess}; members: ${asmNeg.membership}.`);
+    // The actor presents c BY ID (spike D-5: on this transport the actor
+    // holds ciphertext only; find() never resolves). The gate sees the URL —
+    // the block site is accessForDoc() at step 1, not handle load. Expected
+    // behaviour, not a load defect (brief v0.1.3 §4).
+    const cInput: CrossingInputHandle = unloadableInput(
+      sectionC.url,
+      `un-granted document not decryptable by the actor: handle pending at timeout (${cProbeBehaviour})`,
+    );
+    findings.push(`Negative leg: section_c presented to the gate by document ID; actor-side handle pending at timeout (un-granted, not decryptable — spike D-5); gate exercised on the ID at step 1.`);
+    const log: CrossingLogEntry[] = [];
+    const outcome = await initiateCrossing({
+      inputs: [...grantedInputs, cInput],
+      handle: asmNeg.handle,
+      presentedContent: presented,
+      gateCheck: gate,
+      putRecord: neverFire,
+      identity,
+      targetPDS: PDS_SERVICE,
+      regimeAcknowledgment: ACK,
+      crossingTimeoutHorizon: horizonFor(),
+      log,
+    });
+    allLogs.push({ leg: 'negative', log });
+    const asmDoc = (await asmNeg.handle.doc()) as CompletionDocShape;
+    const untouched = assemblyDocIsUntouched(asmDoc);
+    const blockedAt = log.find((l) => l.event === 'gate-check-blocked');
+    const obs = `NEGATIVE leg: presented [section_a, section_b, section_c] → ${outcome.status}${outcome.status === 'gate-blocked' ? ` at accessForDoc(section_c) on the issuer's hive: ${outcome.reason}` : ' (UNEXPECTED)'}; block logged ${blockedAt?.at ?? 'n/a'}; assembly document untouched=${untouched}; intent records=${(asmDoc.crossingRecords ?? []).length}; putRecord not called.`;
+    console.log(`${TAG} ${obs}`);
+    gateObservations.push(obs);
+    if (outcome.status !== 'gate-blocked' || !untouched) {
+      findings.push('NEGATIVE leg did not block as an access-layer block with nothing written — AC-3.1.3 not met; investigate before closing Item 3.1.');
+    }
+  }
+
+  // --- 4b. public-subset: ADVERSARIAL leg (foreign bytes between assembly and digest check) ---
+  if (SCENARIO === 'public-subset') {
+    const asmAdv = await makeAssemblyDoc(actor, author, 'adversarial leg');
+    const injected: CrossingSourceContent = {
+      ...presented,
+      content: presented.content + '\n\n<!-- foreign bytes injected after assembly, before the digest check -->',
+    };
+    const log: CrossingLogEntry[] = [];
+    const outcome = await initiateCrossing({
+      inputs: grantedInputs,
+      handle: asmAdv.handle,
+      presentedContent: injected,
+      gateCheck: gate,
+      putRecord: neverFire,
+      identity,
+      targetPDS: PDS_SERVICE,
+      regimeAcknowledgment: ACK,
+      crossingTimeoutHorizon: horizonFor(),
+      log,
+    });
+    allLogs.push({ leg: 'adversarial', log });
+    const asmDoc = (await asmAdv.handle.doc()) as CompletionDocShape;
+    const untouched = assemblyDocIsUntouched(asmDoc);
+    const obs = `ADVERSARIAL leg: presented [section_a, section_b] + appended foreign bytes → ${outcome.status}${outcome.status === 'digest-blocked' ? ' on hash inequality at step 3 (both gates passed)' : ' (UNEXPECTED)'}; assembly document untouched=${untouched}; no intent; putRecord not called.`;
+    console.log(`${TAG} ${obs}`);
+    gateObservations.push(obs);
+    if (outcome.status !== 'digest-blocked' || !untouched) {
+      findings.push('ADVERSARIAL leg did not block on digest mismatch with nothing written — investigate before closing Item 3.1.');
+    }
+  }
+
+  // --- 5. POSITIVE leg (all scenarios): the governed crossing ---
+  const legLabel = SCENARIO === 'public-subset' ? 'positive leg' : SCENARIO;
+  const asm = await makeAssemblyDoc(actor, author, legLabel);
+  findings.push(`Assembly document creator access (${legLabel}): accessForDoc(self)=${asm.creatorAccess}; members: ${asm.membership}.`);
   const record: WhtwndEntryRecord = {
     $type: 'com.whtwnd.blog.entry',
-    title: content.title,
-    content: content.content,
-    createdAt: content.createdAt,
+    title: presented.title,
+    content: presented.content,
+    createdAt: presented.createdAt,
     visibility: 'public',
   };
   const timings = emptyTimings();
-  // AC-1.5 simulated-failure posture on --scenario failed (A7 ~: the
-  // invalid NSID is rejected CLIENT-side by @atproto/api validation).
   const collection =
     SCENARIO === 'failed' ? 'com.whtwnd.invalid.collection!' : 'com.whtwnd.blog.entry';
   let publishedPayload: WhtwndEntryRecord | null = null;
@@ -220,21 +746,22 @@ async function main() {
     attachSeamCrossingRef: true,
   });
 
-  // --- 4. The governed crossing ---
-  const horizon = new Date(Date.now() + HORIZON_S * 1000).toISOString();
+  const horizon = horizonFor();
   const log: CrossingLogEntry[] = [];
-  const hook = createCompletionHook(); // marked by writeCrossingCompletion() — the closing edge
+  const hook = createCompletionHook();
 
   let outcomeStatus: string;
   let intentEmittedAt: string | null = null;
-  let firedIntent: import('../src/crossing-intent.js').CrossingIntentRecord | null = null;
+  let firedIntent: CrossingIntentRecord | null = null;
   let fireError: string | null = null;
   try {
     const outcome = await initiateCrossing({
-      handle,
+      inputs: grantedInputs,
+      handle: asm.handle,
+      presentedContent: presented,
       gateCheck: gate,
       putRecord: put,
-      identity: { grantorDID: did, targetDID: did, identityCustodyClass: 'provider-custodied' },
+      identity,
       targetPDS: PDS_SERVICE,
       regimeAcknowledgment: ACK,
       crossingTimeoutHorizon: horizon,
@@ -244,84 +771,82 @@ async function main() {
     if (outcome.status === 'fired') {
       intentEmittedAt = outcome.intent.emittedAt;
       firedIntent = outcome.intent;
-      console.log(`[1.4] fired: uri=${outcome.put.uri} cid=${outcome.put.cid}`);
+      console.log(`${TAG} fired: uri=${outcome.put.uri} cid=${outcome.put.cid}`);
+      console.log(`${TAG} intent sourceDocumentURI=${outcome.intent.sourceDocumentURI} (assembly document); sourceLineage=${outcome.intent.sourceLineage.map((l) => l.documentURI).join(', ')}; grantReference=${outcome.intent.grantReference}`);
+      // Spike D-6 / operator (S6 Unit B): the nudge commit is part of the
+      // heads named by sourceDocumentCID (author holds read on the assembly
+      // document) and by each lineage documentCID (a/b granted). Observation.
+      const asmNudge = await hasNudge(asm.handle);
+      const cidObs = `CID observation (spike D-6): sourceDocumentCID=${outcome.intent.sourceDocumentCID} names the assembly document's heads including the author's membership nudge commit (nudge field present on assembly document=${asmNudge}); sourceLineage documentCIDs ${outcome.intent.sourceLineage.map((l) => `${l.documentURI}@${l.documentCID}`).join(', ')} each include the nudge commit on the granted input. Content object and digests unaffected (step-4 recompute equal).`;
+      console.log(`${TAG} ${cidObs}`);
+      findings.push(cidObs);
       const ref = (publishedPayload as WhtwndEntryRecord | null)?.seamCrossingRef;
       if (ref) {
-        console.log(
-          `[1.4] seamCrossingRef attached at fire: crossingIntentRef=${ref.crossingIntentRef.slice(0, 32)}… digest=${ref.authorizedContentDigest.slice(0, 16)}… sourceDoc=${ref.sourceDocumentURI}`,
-        );
+        console.log(`${TAG} seamCrossingRef attached at fire: crossingIntentRef=${ref.crossingIntentRef.slice(0, 32)}… digest=${ref.authorizedContentDigest.slice(0, 16)}… sourceDoc=${ref.sourceDocumentURI}`);
       }
+    } else {
+      console.log(`${TAG} positive leg did not fire: ${outcome.status} — ${(outcome as any).reason ?? ''}`);
     }
   } catch (e: any) {
-    // Publish threw: intent record remains document-resident; no completion.
     outcomeStatus = 'fire-failed';
     fireError = String(e?.message ?? e);
-    const doc = await handle.doc();
+    const doc = await asm.handle.doc();
     intentEmittedAt = (doc.crossingRecords ?? []).at(-1)?.emittedAt ?? null;
-    console.error(`[1.4] publish failed (crossing-intent-failed posture): ${fireError}`);
+    console.error(`${TAG} publish failed (crossing-intent-failed posture): ${fireError}`);
   }
+  allLogs.push({ leg: 'positive', log });
+  gateObservations.push(
+    `POSITIVE leg: presented ${grantedInputs.length} granted input(s) → gate passed on isReader for each (issuer's hive) → assembled → digest matched → assembly document written → ${outcomeStatus}.`,
+  );
 
-  // --- 5. Relay observation (success path) ---
+  // --- 6. Relay observation (success path) ---
   let relayIngestedAt: string | null = null;
   if (outcomeStatus === 'fired') {
     const relay = await watcher.observed();
     relayIngestedAt = relay.relayIngestedAt;
     console.log(
       relay.timedOut
-        ? `[1.4] relay event NOT observed within ${RELAY_TIMEOUT_MS}ms (H.3 null)`
-        : `[1.4] relay ingested: ${relay.observedUri}`,
+        ? `${TAG} relay event NOT observed within ${RELAY_TIMEOUT_MS}ms (H.3 null)`
+        : `${TAG} relay ingested: ${relay.observedUri}`,
     );
   }
   watcher.close();
 
-  // --- 6. Item 1.4 — getRecord() intact-check (build plan 1.4 acceptance) ---
-  // The record is fetched back from the PDS and the STORED seamCrossingRef
-  // is checked present + digest-matched against the fired intent record.
-  // A stripped field would be a protocol observation (PDSes are required
-  // to store unknown fields per the Lexicon spec) — recorded, not fatal.
+  // --- 7. getRecord() intact-check + B-5 check (published record names no non-granted document) ---
   let kl2: string;
   if (outcomeStatus === 'fired' && timings.uri) {
     const rkey = timings.uri.split('/').at(-1)!;
     try {
-      const got = await agent.com.atproto.repo.getRecord({
-        repo: did,
-        collection: 'com.whtwnd.blog.entry',
-        rkey,
-      });
+      const got = await agent.com.atproto.repo.getRecord({ repo: did, collection: 'com.whtwnd.blog.entry', rkey });
       const stored = (got.data.value as any)?.seamCrossingRef as SeamCrossingRef | undefined;
       if (stored && firedIntent) {
         const verify = verifySeamCrossingRefAgainstIntent(stored, firedIntent);
-        console.log(
-          verify.valid
-            ? '[1.4] getRecord(): seamCrossingRef INTACT in PDS-stored record; digest + intent-ref match the fired intent'
-            : `[1.4] getRecord(): seamCrossingRef present but MISMATCHED: ${verify.errors.join('; ')}`,
-        );
+        const namesC = sectionC
+          ? JSON.stringify(stored).includes(sectionC.url) || JSON.stringify(firedIntent.sourceLineage).includes(sectionC.url)
+          : false;
         kl2 = verify.valid
-          ? `seamCrossingRef attached at publish and returned INTACT by getRecord() (crossingIntentRef + authorizedContentDigest + sourceDocumentURI/CID all match the fired intent record). Back-pointer survives PDS storage. AppView surface/drop (whtwnd.com): operator observation pending — record manually. Deep round-trip (firehose payload; AppView store) is Phase 2 Item 2.1.`
-          : `seamCrossingRef returned by getRecord() but MISMATCHED against the fired intent: ${verify.errors.join('; ')} — investigate before Phase 2.`;
+          ? `seamCrossingRef (four-field singular shape) returned INTACT by getRecord(); it points at the ASSEMBLY document ${stored.sourceDocumentURI} (D-5), not an input.${sectionC ? ` B-5: published record or sourceLineage names section_c = ${namesC} (expected false).` : ''} AppView surface/drop (whtwnd.com): operator observation — expected unchanged from Runs 4–5 (dropped at AppView); record manually.`
+          : `seamCrossingRef returned but MISMATCHED against the fired intent: ${verify.errors.join('; ')} — investigate.`;
       } else if (firedIntent) {
-        console.log('[1.4] getRecord(): seamCrossingRef ABSENT from PDS-stored record');
-        kl2 =
-          'seamCrossingRef attached at publish but ABSENT from the getRecord() response — the PDS stripped an unknown field (protocol violation per the Lexicon spec; notable KL-2 finding). Record verbatim.';
+        kl2 = 'seamCrossingRef attached at publish but ABSENT from the getRecord() response — record verbatim (differs from Runs 4–5).';
       } else {
         kl2 = 'getRecord() returned but no fired intent to verify against (unexpected).';
       }
     } catch (e: any) {
-      console.error(`[1.4] getRecord() failed: ${String(e?.message ?? e)}`);
-      kl2 = `getRecord() intact-check failed to execute (${String(e?.message ?? e)}); publish-side seamCrossingRef attachment stands; re-run the fetch before closing 1.4's live half.`;
+      kl2 = `getRecord() intact-check failed to execute (${String(e?.message ?? e)}); publish-side seamCrossingRef attachment stands; re-run the fetch.`;
     }
   } else {
-    kl2 =
-      'No publish accepted this run (failure-path scenario): no back-pointer crossed. seamCrossingRef attachment is fire-time payload content only — nothing published, nothing to check.';
+    kl2 = 'No publish accepted this run: no back-pointer crossed. seamCrossingRef attachment is fire-time payload content only.';
   }
+  console.log(`${TAG} KL-2: ${kl2}`);
 
-  // --- 7. Item 1.3 — write the crossing-completion record (success path) ---
+  // --- 8. Completion record (success path) — into the ASSEMBLY document ---
   let h3Outcome: 'completed' | 'failed' | 'timeout';
   let kl1: string;
   if (outcomeStatus === 'fired') {
     try {
       const completion = await writeCrossingCompletion({
-        handle,
+        handle: asm.handle,
         intent: firedIntent!,
         put: { uri: timings.uri, cid: timings.cid },
         pdsAcceptedAt: timings.pdsAcceptedAt,
@@ -329,62 +854,53 @@ async function main() {
         hook,
         log,
       });
-      const doc = (await handle.doc()) as CompletionDocShape;
+      const doc = (await asm.handle.doc()) as CompletionDocShape;
       const state = deriveDocumentCrossingState(doc);
-      console.log(
-        `[1.4] completion record written: crossingIntentRef=${completion.crossingIntentRef.slice(0, 32)}… targetCID=${completion.crossingTargetCID}`,
-      );
-      console.log(`[1.4] document-legible state (no external lookup): ${state}`);
+      console.log(`${TAG} completion record written into the assembly document: crossingIntentRef=${completion.crossingIntentRef.slice(0, 32)}… targetCID=${completion.crossingTargetCID}`);
+      console.log(`${TAG} assembly document-legible state (no external lookup): ${state}`);
       h3Outcome = 'completed';
-      kl1 =
-        `Fired; publish accepted; crossing-completion record written and confirmed document-resident (crossingIntentRef content-addresses the intent record; crossingTargetCID matches the PDS response). Document-legible state: ${state}. A deferred party reading the document sees intent AND ref-matched completion: crossing-complete — chain closed. The published record carries the Item 1.4 seamCrossingRef: the chain is now traversable from the AT Protocol side back to the governed document.`;
+      kl1 = `Fired; publish accepted; crossing-completion minted in the ASSEMBLY document (actor-owned; author holds read) and confirmed document-resident. Document-legible state: ${state}. KL-1 (D-5 cost, not a defect): a deferred party following sourceDocumentURI lands on the actor's assembly document ${asm.handle.url}, not the author's content documents; the author's documents are reachable only via the intent's sourceLineage (${firedIntent!.sourceLineage.length} entries) and carry no crossing records. Gate evaluated on the issuer's hive, not the presenting party's (ruling 2) — legibility note.`;
     } catch (e: any) {
       const mintErr = String(e?.message ?? e);
-      console.error(`[1.4] completion mint FAILED (worst-case taxonomy state): ${mintErr}`);
+      console.error(`${TAG} completion mint FAILED (worst-case taxonomy state): ${mintErr}`);
       const remaining = Date.parse(horizon) - Date.now();
-      if (remaining > 0) await new Promise((r) => setTimeout(r, remaining + 50));
+      if (remaining > 0) await sleep(remaining + 50);
       h3Outcome = 'timeout';
-      kl1 = `Publish accepted but completion record minting failed (${mintErr}): completion-mint-failed — crossing happened; the chain reads crossing-unconfirmed unless a completion is retroactively minted (author-declared; KL-8).`;
+      kl1 = `Publish accepted but completion record minting failed (${mintErr}): completion-mint-failed — crossing happened; the assembly document reads crossing-unconfirmed.`;
     }
   } else if (outcomeStatus === 'fire-failed') {
     h3Outcome = 'failed';
-    kl1 = `Publish failed (${fireError}). Intent record remains document-resident with no completion: crossing-intent-failed, legible without external lookup (deriveDocumentCrossingState reads crossing-intent-pending → crossing-unconfirmed at horizon elapse); retry requires a new gate pass (KL-8a).`;
+    kl1 = `Publish failed (${fireError}). Intent record remains resident in the assembly document with no completion: crossing-intent-failed, legible without external lookup; retry requires a new gate pass (KL-8a).`;
   } else {
     h3Outcome = 'failed';
-    kl1 = `Crossing did not fire (${outcomeStatus}). See crossing log for the blocking event.`;
+    kl1 = `Positive leg did not fire (${outcomeStatus}). See crossing log for the blocking event.`;
   }
 
-  // --- 8. Emit the H.3 entry to its OWN file (never the canonical log) ---
-  const entry = buildH3Entry({
-    runNumber: RUN_N,
+  // --- 9. Emit the H.3 entry to its OWN file (never the canonical log) ---
+  await emitEntry({
+    outcome: h3Outcome,
     scenario: SCENARIO,
-    crossingLog: log,
+    log,
     intentEmittedAt,
-    putRecordCalledAt: timings.putRecordCalledAt,
-    pdsAcceptedAt: timings.pdsAcceptedAt,
+    timings,
     relayIngestedAt,
-    completionWrittenAt: hook.completionWrittenAt, // closing edge (null on failed runs)
-    crossingOutcome: h3Outcome,
-    kl1Observation: kl1,
-    kl2Observation: kl2,
+    completionWrittenAt: hook.completionWrittenAt,
+    kl1,
+    kl2,
+    phase3: phase3Fields(SCENARIO, gateObservations, findings),
   });
-  console.log('\n' + renderH3Entry(entry, `Item 1.4 back-pointer-carrying run (${SCENARIO})`));
-  const outPath = writeH3EntryFile(entry, {
-    runLabel: `Item 1.4 back-pointer-carrying run (${SCENARIO})`,
-  });
-  console.log(`[1.4] H.3 entry written to ${outPath}`);
-  console.log('[1.4] Paste the block into the canonical observation log by hand (append-only).');
 
-  // --- 9. Full crossing log ---
-  console.log('[1.4] crossing log (ordered):');
-  for (const l of log) console.log(`       ${l.at}  ${l.event}${l.detail ? `  (${l.detail})` : ''}`);
-  if (timings.cid) console.log(`[1.4] captured CID (crossingTargetCID): ${timings.cid}`);
-
-  console.log(`[1.4] ITEM 1.4 BACK-POINTER RUN: ${outcomeStatus.toUpperCase()}`);
+  // --- 10. Full crossing logs, per leg ---
+  for (const { leg, log: l } of allLogs) {
+    console.log(`${TAG} crossing log — ${leg} leg (ordered):`);
+    for (const line of fmtLog(l)) console.log(line);
+  }
+  if (timings.cid) console.log(`${TAG} captured CID (crossingTargetCID): ${timings.cid}`);
+  console.log(`${TAG} RUN ${RUN_N} (${SCENARIO}): ${outcomeStatus.toUpperCase()} — operator confirms acceptance criteria against the entry; this runner does not self-report completion.`);
   process.exit(0);
 }
 
 main().catch((e) => {
-  console.error('[1.4] ITEM 1.4 RUN: FAIL', e);
+  console.error(`${TAG} RUN: FAIL`, e);
   process.exit(1);
 });

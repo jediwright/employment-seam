@@ -45,6 +45,11 @@ import type {
   Clock,
 } from './crossing-intent.js';
 import { COMPLETION_WRITTEN_EVENT, type CompletionHook } from './crossing-fire.js';
+import { canonicalJson } from './canonical-json.js';
+
+/** Re-exported for compatibility: canonicalJson() moved to canonical-json.ts
+ *  at Item 3.1 so assembly.ts can share it without a module cycle. */
+export { canonicalJson };
 
 // ---------------------------------------------------------------------------
 // Schema — build plan §2 Item 1.3 concrete interface, carrying the spec's
@@ -132,20 +137,6 @@ export function validateCrossingCompletionRecord(
 // ---------------------------------------------------------------------------
 // Intent-record content address
 // ---------------------------------------------------------------------------
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(',')}]`;
-  }
-  if (value !== null && typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, v]) => v !== undefined)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`);
-    return `{${entries.join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
 
 /** Deterministic local document reference to an intent record:
  *  sha256 over sorted-key canonical JSON, prefixed for legibility. */

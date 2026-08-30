@@ -89,21 +89,27 @@ function memHandle(initial: CompletionDocShape): CompletionHandle & {
   };
 }
 
-const passGate: GateCheckFn = async () => ({
+/** Item 3.1: per-document gate shape; always passes in these mem tests. */
+const passGate: GateCheckFn = async ({ documentURI }) => ({
   result: 'pass',
   grantReference: 'keyhive:test:read',
   gateCheckedAt: new Date().toISOString(),
+  access: 'Read',
+  documentURI,
 });
 
 /** Fires a crossing against the mem handle with attachment configurable;
  *  captures the exact payload the publish call receives. */
 async function firedWithRef(attach: boolean) {
   const clock = steppingClock('2026-08-18T16:00:00.000Z', 100);
-  const handle = memHandle({
+  // Item 3.1 uniform path: one granted input; assembly document hosts records.
+  const input = memHandle({
     title: 't14',
     content: 'c14',
     createdAt: '2026-08-18T15:59:00.000Z',
   });
+  input.url = 'automerge:meminput14';
+  const handle = memHandle({ title: '', content: '', createdAt: null });
   const timings = emptyTimings();
   const record: WhtwndEntryRecord = {
     $type: 'com.whtwnd.blog.entry',
@@ -131,7 +137,9 @@ async function firedWithRef(attach: boolean) {
     Date.parse('2026-08-18T16:00:00.000Z') + 60_000,
   ).toISOString();
   const outcome = await initiateCrossing({
+    inputs: [input],
     handle,
+    presentedContent: { title: 't14', content: 'c14', createdAt: '2026-08-18T15:59:00.000Z' },
     gateCheck: passGate,
     putRecord: put,
     identity: {
@@ -291,9 +299,9 @@ describe('end-to-end: payload ref verifies against the document-resident intent 
     }
     expect(granted).toBe(true);
 
-    const gate: GateCheckFn = async () => {
-      const access = await owner.hive.accessForDoc(individual!.id, handle.url);
-      return access !== undefined
+    const gate: GateCheckFn = async ({ documentURI }) => {
+      const access = await owner.hive.accessForDoc(individual!.id, documentURI as any);
+      return access !== undefined && access.isReader
         ? {
             result: 'pass',
             grantReference: `keyhive:${Buffer.from(individual!.id.toBytes()).toString('hex')}:read`,
@@ -331,8 +339,12 @@ describe('end-to-end: payload ref verifies against the document-resident intent 
 
     const log: CrossingLogEntry[] = [];
     const horizon = new Date(Date.now() + 60_000).toISOString();
+    // Item 3.1: actor-owned assembly document (D-5) hosts the records.
+    const asm = await (actor.repo as any).create2({ title: '', content: '', createdAt: null });
     const outcome = await initiateCrossing({
-      handle,
+      inputs: [handle],
+      handle: asm,
+      presentedContent: content,
       gateCheck: gate,
       putRecord: put,
       identity: {
@@ -351,7 +363,7 @@ describe('end-to-end: payload ref verifies against the document-resident intent 
     // KL-2 traversal direction: start from the published payload's ref and
     // verify against the intent record read back FROM THE DOCUMENT — not
     // from the in-memory outcome object.
-    const doc = (await handle.doc()) as CompletionDocShape;
+    const doc = (await asm.doc()) as CompletionDocShape;
     const residentIntent = (doc.crossingRecords ?? []).at(-1) as CrossingIntentRecord;
     expect(residentIntent).toBeDefined();
     const ref = publishedPayload!.seamCrossingRef!;
@@ -366,7 +378,7 @@ describe('end-to-end: payload ref verifies against the document-resident intent 
     // Completion arc undisturbed by the widened fire step.
     const hook = createCompletionHook();
     await writeCrossingCompletion({
-      handle,
+      handle: asm,
       intent: outcome.intent,
       put: { uri: timings.uri, cid: timings.cid },
       pdsAcceptedAt: timings.pdsAcceptedAt,
@@ -374,7 +386,7 @@ describe('end-to-end: payload ref verifies against the document-resident intent 
       hook,
       log,
     });
-    const after = (await handle.doc()) as CompletionDocShape;
+    const after = (await asm.doc()) as CompletionDocShape;
     expect(deriveDocumentCrossingState(after)).toBe('crossing-complete');
   }, 30_000);
 });

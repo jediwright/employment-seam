@@ -93,10 +93,13 @@ function memHandle(initial: CompletionDocShape): CompletionHandle & {
   };
 }
 
-const passGate: GateCheckFn = async () => ({
+/** Item 3.1: per-document gate shape; always passes in these mem tests. */
+const passGate: GateCheckFn = async ({ documentURI }) => ({
   result: 'pass',
   grantReference: 'keyhive:test:read',
   gateCheckedAt: new Date().toISOString(),
+  access: 'Read',
+  documentURI,
 });
 
 /** Runs a full fired crossing against the mem handle; returns everything
@@ -107,11 +110,15 @@ async function firedCrossing(opts?: {
   publishFails?: boolean;
 }) {
   const clock = opts?.clock ?? steppingClock('2026-08-18T15:00:00.000Z', 100);
-  const handle = memHandle({
+  // Item 3.1 uniform path: one granted input; the assembly document (mem)
+  // receives the assembled output and hosts the records.
+  const input = memHandle({
     title: 't',
     content: 'c',
     createdAt: '2026-08-18T14:59:00.000Z',
   });
+  input.url = 'automerge:meminput';
+  const handle = memHandle({ title: '', content: '', createdAt: null });
   const timings = emptyTimings();
   const record: WhtwndEntryRecord = {
     $type: 'com.whtwnd.blog.entry',
@@ -137,7 +144,9 @@ async function firedCrossing(opts?: {
   let fireErr: string | null = null;
   try {
     const outcome = await initiateCrossing({
+      inputs: [input],
       handle,
+      presentedContent: { title: 't', content: 'c', createdAt: '2026-08-18T14:59:00.000Z' },
       gateCheck: passGate,
       putRecord: put,
       identity: {
@@ -455,9 +464,9 @@ describe('end-to-end: gate → intent → publish → completion (AC-o)', () => 
     }
     expect(granted).toBe(true);
 
-    const gate: GateCheckFn = async () => {
-      const access = await owner.hive.accessForDoc(individual!.id, handle.url);
-      return access !== undefined
+    const gate: GateCheckFn = async ({ documentURI }) => {
+      const access = await owner.hive.accessForDoc(individual!.id, documentURI as any);
+      return access !== undefined && access.isReader
         ? {
             result: 'pass',
             grantReference: `keyhive:${Buffer.from(individual!.id.toBytes()).toString('hex')}:read`,
@@ -488,8 +497,12 @@ describe('end-to-end: gate → intent → publish → completion (AC-o)', () => 
     });
     const log: CrossingLogEntry[] = [];
     const hook = createCompletionHook();
+    // Item 3.1: actor-owned assembly document (D-5) hosts the records.
+    const asm = await (actor.repo as any).create2({ title: '', content: '', createdAt: null });
     const outcome = await initiateCrossing({
-      handle,
+      inputs: [handle],
+      handle: asm,
+      presentedContent: content,
       gateCheck: gate,
       putRecord: put,
       identity: {
@@ -506,7 +519,7 @@ describe('end-to-end: gate → intent → publish → completion (AC-o)', () => 
     if (outcome.status !== 'fired') return;
 
     const completion = await writeCrossingCompletion({
-      handle,
+      handle: asm,
       intent: outcome.intent,
       put: { uri: timings.uri, cid: timings.cid },
       pdsAcceptedAt: timings.pdsAcceptedAt,
@@ -515,7 +528,7 @@ describe('end-to-end: gate → intent → publish → completion (AC-o)', () => 
     });
     expect(completion.crossingTargetCID).toBe(RUN1_CID);
 
-    const doc = (await handle.doc()) as CompletionDocShape;
+    const doc = (await asm.doc()) as CompletionDocShape;
     expect(deriveDocumentCrossingState(doc)).toBe('crossing-complete');
     // Ordered discipline: closing edge is the final event, after
     // put-record-accepted.

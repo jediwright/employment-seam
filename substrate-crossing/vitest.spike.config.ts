@@ -1,7 +1,8 @@
 import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
-    include: ['test/*.test.ts'],
-    passWithNoTests: true,
+    include: ['test/spike/**/*.test.ts'],
+    testTimeout: 90_000,
+    passWithNoTests: false,
   },
 });

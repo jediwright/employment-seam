@@ -16,6 +16,12 @@
  *   the operator pastes the block into the canonical log by hand. The
  *   canonical log's append-only discipline stays under the operator's hand.
  *
+ * ITEM 3.1 (Run 6, 2026-08-29): the three `phase3_*` fields join the entry
+ *   model and the renderer (CONVENTIONS §Observation log). They are required
+ *   from Run 6 — buildH3Entry() throws for runNumber ≥ 6 without them — and
+ *   optional for Runs 1–5, where they render as `n/a` (structurally
+ *   inapplicable; distinct from `null` = applicable-but-unobserved).
+ *
  * WINDOW ANCHOR (settled at session open, 2026-08-18):
  *   The intent-without-completion window's OPENING edge is the
  *   `intent-record-written` event in the CrossingLogEntry[] timing log —
@@ -53,6 +59,21 @@ export type H3Scenario =
  *  timeout → crossing-unconfirmed (horizon elapsed, no completion). */
 export type H3Outcome = 'completed' | 'failed' | 'timeout';
 
+/** Phase 3 pattern CV (CONVENTIONS §Observation log). */
+export type H3Phase3Pattern = 'public-subset' | 'delayed-release' | 'aggregated';
+
+/** Phase 3 fields — required from Run 6 onward. */
+export interface H3Phase3Fields {
+  pattern: H3Phase3Pattern;
+  /** What the gate did — pass / block / reason. */
+  gateObservation: string;
+  /** Any architectural observation not captured above. */
+  finding: string;
+}
+
+/** First run at which the phase3_* fields are required. */
+export const PHASE3_FIELDS_REQUIRED_FROM_RUN = 6;
+
 export interface H3Entry {
   crossing_run: number;
   scenario: H3Scenario;
@@ -67,6 +88,10 @@ export interface H3Entry {
   intent_without_completion_window_ms: number | null;
   kl1_legibility_observation: string;
   kl2_back_pointer_observation: string;
+  /** Item 3.1: null on pre-Run-6 entries (renders `n/a`). */
+  phase3_pattern: H3Phase3Pattern | null;
+  phase3_gate_observation: string | null;
+  phase3_finding: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +116,9 @@ export interface BuildH3EntryParams {
   crossingOutcome: H3Outcome;
   kl1Observation: string;
   kl2Observation: string;
+  /** Required for runNumber ≥ PHASE3_FIELDS_REQUIRED_FROM_RUN; optional
+   *  (omitted → n/a) for earlier runs. */
+  phase3?: H3Phase3Fields;
 }
 
 function findEvent(
@@ -110,6 +138,11 @@ function deltaMs(fromIso: string | null, toIso: string | null): number | null {
 }
 
 export function buildH3Entry(p: BuildH3EntryParams): H3Entry {
+  if (p.runNumber >= PHASE3_FIELDS_REQUIRED_FROM_RUN && !p.phase3) {
+    throw new Error(
+      `phase3_* fields are required from Run ${PHASE3_FIELDS_REQUIRED_FROM_RUN} (got run ${p.runNumber} without them)`,
+    );
+  }
   // Window opening edge: intent-record-written (see module header).
   const windowOpensAt = findEvent(p.crossingLog, 'intent-record-written');
 
@@ -130,6 +163,9 @@ export function buildH3Entry(p: BuildH3EntryParams): H3Entry {
     ),
     kl1_legibility_observation: p.kl1Observation,
     kl2_back_pointer_observation: p.kl2Observation,
+    phase3_pattern: p.phase3?.pattern ?? null,
+    phase3_gate_observation: p.phase3?.gateObservation ?? null,
+    phase3_finding: p.phase3?.finding ?? null,
   };
 }
 
@@ -139,6 +175,12 @@ export function buildH3Entry(p: BuildH3EntryParams): H3Entry {
 
 function fmt(v: string | number | null): string {
   return v === null ? 'null' : String(v);
+}
+
+/** Phase 3 fields absent on a pre-Run-6 entry are structurally
+ *  inapplicable — `n/a`, not `null` (CONVENTIONS §Observation log). */
+function fmtNa(v: string | null): string {
+  return v === null ? 'n/a' : v;
 }
 
 /** Renders one append-ready entry block matching
@@ -163,6 +205,9 @@ export function renderH3Entry(entry: H3Entry, runLabel?: string): string {
     `intent_without_completion_window_ms: ${fmt(entry.intent_without_completion_window_ms)}`,
     `kl1_legibility_observation: ${entry.kl1_legibility_observation}`,
     `kl2_back_pointer_observation: ${entry.kl2_back_pointer_observation}`,
+    `phase3_pattern:      ${fmtNa(entry.phase3_pattern)}`,
+    `phase3_gate_observation: ${fmtNa(entry.phase3_gate_observation)}`,
+    `phase3_finding:      ${fmtNa(entry.phase3_finding)}`,
     '```',
   ];
   return `${heading}\n\n${lines.join('\n')}\n`;
@@ -184,9 +229,9 @@ export function writeH3EntryFile(
     opts.outPath ?? `docs/run-${entry.crossing_run}-entry_${date}.md`;
   mkdirSync(dirname(path), { recursive: true });
   const body = [
-    `<!-- Machine-emitted §H.3 entry — Item 1.2 instrumentation.`,
+    `<!-- Machine-emitted §H.3 entry — Item 1.2 instrumentation (phase3_* fields from Item 3.1).`,
     `     NOT the canonical observation log. Paste the block below into`,
-    `     observation-log-template-pc08.md by hand (append-only,`,
+    `     docs/observation-log-pc08.md by hand (append-only,`,
     `     delivery-not-application). -->`,
     '',
     renderH3Entry(entry, opts.runLabel),

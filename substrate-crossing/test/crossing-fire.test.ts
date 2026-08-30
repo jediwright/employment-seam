@@ -281,6 +281,9 @@ describe('H.3 entry assembly (AC-1.4/1.7 mechanism)', () => {
       'intent_without_completion_window_ms:',
       'kl1_legibility_observation:',
       'kl2_back_pointer_observation:',
+      'phase3_pattern:',
+      'phase3_gate_observation:',
+      'phase3_finding:',
     ];
     const fieldLines = rendered
       .split('\n')
@@ -291,6 +294,8 @@ describe('H.3 entry assembly (AC-1.4/1.7 mechanism)', () => {
     expect(rendered).toContain('relay_ingested_at:   null');
     expect(rendered).toContain('relay_ingest_gap_ms: null');
     expect(rendered).toContain('intent_without_completion_window_ms: null');
+    // Item 3.1: pre-Run-6 entries render the phase3_* fields as n/a.
+    expect(rendered).toContain('phase3_pattern:      n/a');
   });
 });
 
@@ -329,18 +334,19 @@ describe('end-to-end: governed crossing with timed publish + relay sim (AC-g)', 
         createRepo: (cfg: any) => new Repo(cfg),
       });
     const [owner, actor] = await Promise.all([mk(a, 'owner12'), mk(b, 'actor12')]);
-    const handle = await (owner.repo as any).create2({
+    const e2eContent = {
       title: 'PC#8 Item 1.2 e2e',
       content: 'end-to-end governed crossing (mock PDS, local relay sim)',
       createdAt: new Date().toISOString(),
-    });
+    };
+    const handle = await (owner.repo as any).create2(e2eContent);
     const card = actor.hive.active.contactCard;
     const individual = await owner.hive.receiveContactCard(card);
     await owner.hive.addMemberToDoc(handle.url, card, Access.read());
 
-    const gate: GateCheckFn = async () => {
-      const access = await owner.hive.accessForDoc(individual!.id, handle.url);
-      return access !== undefined
+    const gate: GateCheckFn = async ({ documentURI }) => {
+      const access = await owner.hive.accessForDoc(individual!.id, documentURI as any);
+      return access !== undefined && access.isReader
         ? {
             result: 'pass',
             grantReference: `keyhive:${String(individual!.id)}:read`,
@@ -388,8 +394,12 @@ describe('end-to-end: governed crossing with timed publish + relay sim (AC-g)', 
     });
 
     const log: CrossingLogEntry[] = [];
+    // Item 3.1: actor-owned assembly document (D-5) hosts the records.
+    const asm = await (actor.repo as any).create2({ title: '', content: '', createdAt: null });
     const outcome = await initiateCrossing({
-      handle,
+      inputs: [handle],
+      handle: asm,
+      presentedContent: e2eContent,
       gateCheck: gate,
       putRecord: put,
       identity: {
@@ -424,6 +434,8 @@ describe('end-to-end: governed crossing with timed publish + relay sim (AC-g)', 
       kl1Observation:
         'e2e in-container: intent document-resident before fire; completion pending Item 1.3',
       kl2Observation: 'n/a at Item 1.2',
+      // Item 3.1: runNumber ≥ 6 requires the phase3_* fields.
+      phase3: { pattern: 'public-subset', gateObservation: 'e2e: single granted input passed isReader', finding: 'none' },
     });
 
     // Ordering: written < fired <= called <= accepted <= relay-ingested.
@@ -443,7 +455,7 @@ describe('end-to-end: governed crossing with timed publish + relay sim (AC-g)', 
     // CID captured for the Item 1.3 completion record's crossingTargetCID.
     expect(timings.cid).toBe('bafye2ecid');
     // Intent record remains document-resident (deferred-party legibility).
-    const doc = await handle.doc();
+    const doc = await asm.doc();
     expect((doc.crossingRecords ?? []).length).toBe(1);
   });
 });
