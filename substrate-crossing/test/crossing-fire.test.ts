@@ -372,8 +372,10 @@ describe('end-to-end: governed crossing with timed publish + relay sim (AC-g)', 
     // Mock PDS publish: resolves after a short real delay, then the relay
     // sim broadcasts the commit event (accept precedes ingest).
     const timings = emptyTimings();
+    let publishedPayload: WhtwndEntryRecord | null = null;
     const put = makeTimedPutRecord({
       publish: async (rec) => {
+        publishedPayload = rec;
         await new Promise((r) => setTimeout(r, 25));
         setTimeout(() => {
           const payload = JSON.stringify({
@@ -389,7 +391,18 @@ describe('end-to-end: governed crossing with timed publish + relay sim (AC-g)', 
         }, 25);
         return { uri: `at://${TEST_DID}/com.whtwnd.blog.entry/e2erkey1`, cid: 'bafye2ecid' };
       },
-      record: makeRecord(),
+      // F-3.3-1: this fixture previously wired makeRecord() — a payload
+      // divergent from the authorized assembly, masked until Item 3.3's
+      // fire-time verification existed. The record is now built from the
+      // same content the intent authorizes (single input → assembled
+      // content object = e2eContent's fields), as the runner does.
+      record: {
+        $type: 'com.whtwnd.blog.entry',
+        title: e2eContent.title,
+        content: e2eContent.content,
+        createdAt: e2eContent.createdAt,
+        visibility: 'public',
+      },
       timings,
     });
 
@@ -414,6 +427,13 @@ describe('end-to-end: governed crossing with timed publish + relay sim (AC-g)', 
     });
     expect(outcome.status).toBe('fired');
     if (outcome.status !== 'fired') return;
+    // F-3.3-1 remediation: assert on the PUBLISHED CONTENT, not only on
+    // timing/order — the payload that left is the payload that was
+    // authorized (a guarantee, no longer a coincidence).
+    expect(publishedPayload).not.toBeNull();
+    expect(publishedPayload!.title).toBe(e2eContent.title);
+    expect(publishedPayload!.content).toBe(e2eContent.content);
+    expect(publishedPayload!.createdAt).toBe(e2eContent.createdAt);
 
     const relay = await watcher.observed();
     watcher.close();

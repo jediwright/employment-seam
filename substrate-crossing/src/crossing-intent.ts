@@ -294,6 +294,10 @@ export type CrossingEvent =
   | 'intent-record-written'
   | 'intent-record-read-confirmed'
   | 'timeout-horizon-expired'
+  // Item 3.3 — fire-time re-verification (TOCTOU between mint and fire);
+  // both stamped between the step-8 timeout re-check and the fire
+  | 'fire-verification-pass'
+  | 'fire-verification-blocked'
   | 'put-record-fired'
   | 'put-record-accepted'
   // Item 1.3 — the intent-without-completion window's closing edge
@@ -358,6 +362,15 @@ export interface InitiateCrossingParams {
   crossingGrantHorizon?: string;
   clock?: Clock;
   log?: CrossingLogEntry[];
+  /** Item 3.3 TEST-ONLY injection point (Q4 ruling, spike-D discipline):
+   *  invoked between step 7 (read-confirm) and step 8 (timeout re-check),
+   *  opening the mint-to-fire window deterministically so the Run 8 TOCTOU
+   *  leg can mutate the assembly document inside it. Rules: OMITTED on the
+   *  production path (omitted-never-null, the crossingGrantHorizon rule);
+   *  present-but-not-a-function is a seam fault. This is a function
+   *  parameter, never a record field — it cannot enter canonical JSON or
+   *  any digest. */
+  __testOnlyBetweenMintAndFire?: () => void | Promise<void>;
 }
 
 export type CrossingOutcome =
@@ -367,7 +380,14 @@ export type CrossingOutcome =
   | { status: 'horizon-expired'; reason: string; log: CrossingLogEntry[] }
   // Item 3.2
   | { status: 'horizon-not-reached'; reason: string; log: CrossingLogEntry[] }
-  | { status: 'horizon-inconsistent'; reason: string; log: CrossingLogEntry[] };
+  | { status: 'horizon-inconsistent'; reason: string; log: CrossingLogEntry[] }
+  /** Item 3.3: fire-time re-verification failed — the assembly document's
+   *  content no longer matches the minted authorizedContentDigest. A gate-
+   *  style BLOCK, not a seam fault (Q2 ruling): time passed and the
+   *  document changed under the seam — an external condition detected,
+   *  like an expired horizon. The intent record remains document-resident;
+   *  the crossing reads crossing-unconfirmed. */
+  | { status: 'fire-verification-blocked'; reason: string; log: CrossingLogEntry[] };
 
 /**
  * Executes one governed crossing attempt under the write-before-fire
@@ -395,7 +415,13 @@ export type CrossingOutcome =
  *      (sourceDocumentURI/CID = assembly document; sourceLineage = inputs;
  *      crossingGrantHorizon carried when present).
  *   7. Read back; confirm present.
+ *   7t. (test-only, Item 3.3) optional injected hook — opens the
+ *      mint-to-fire window for the Run 8 TOCTOU leg; omitted in production.
  *   8. Re-check the timeout horizon at fire; expired → do not fire.
+ *   8v. Fire-time re-verification (Item 3.3): fresh read of the assembly
+ *      document; digest over its content object must hash-equal the minted
+ *      authorizedContentDigest. Mismatch → fire-verification-blocked; no
+ *      putRecord; intent stays document-resident (crossing-unconfirmed).
  *   9. Fire putRecord(intent).
  */
 export async function initiateCrossing(
@@ -553,6 +579,17 @@ export async function initiateCrossing(
   }
   stamp('intent-record-read-confirmed');
 
+  // 7t — Item 3.3 test-only injection point (Q4 ruling). Omitted on the
+  // production path; presence with a non-function is a seam fault.
+  if (p.__testOnlyBetweenMintAndFire !== undefined) {
+    if (typeof p.__testOnlyBetweenMintAndFire !== 'function') {
+      throw new Error(
+        'seam fault: __testOnlyBetweenMintAndFire present but not a function; omit it entirely on the production path (omitted-never-null)',
+      );
+    }
+    await p.__testOnlyBetweenMintAndFire();
+  }
+
   // 8 — horizon re-check at fire time
   if (clock().getTime() >= horizonMs) {
     stamp('timeout-horizon-expired', 'expired between mint and fire; putRecord not fired');
@@ -562,6 +599,23 @@ export async function initiateCrossing(
       log,
     };
   }
+
+  // 8v — Item 3.3: fire-time re-verification (TOCTOU between mint and
+  // fire). One fresh read; hash equality only against the MINTED digest.
+  // A mismatch is a gate-style BLOCK (Q2 ruling: external condition
+  // detected — the document changed under the seam), never a throw: the
+  // block preserves the evidence posture (loggable event, document-
+  // resident intent, crossing-unconfirmed derivation). The re-verification
+  // collapses the exploitable window to (this read → fire); it cannot
+  // eliminate it (spec r2 §Item 3.3 TOCTOU surface note).
+  const fireDoc = await p.handle.doc();
+  const fireDigest = computeAuthorizedContentDigest(fireDoc);
+  if (fireDigest !== intent.authorizedContentDigest) {
+    const reason = `assembly document content digest ${fireDigest} != minted authorizedContentDigest ${intent.authorizedContentDigest} at fire time (assembly-mutated-after-mint); putRecord not fired; intent record remains document-resident; crossing reads crossing-unconfirmed; retry requires a fresh gate pass (steps 1–3h, KL-8a posture)`;
+    stamp('fire-verification-blocked', reason);
+    return { status: 'fire-verification-blocked', reason, log };
+  }
+  stamp('fire-verification-pass', `digest ${fireDigest} re-verified against the minted authorizedContentDigest; mint→verify window measured intent-record-written → this stamp; residual window this stamp → put-record-fired`);
 
   // 9 — fire (the minted intent travels with the fire — Item 1.4)
   stamp('put-record-fired');

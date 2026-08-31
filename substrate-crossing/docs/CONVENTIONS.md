@@ -1,8 +1,8 @@
 # substrate-crossing conventions
 
-**Version:** v0.3
+**Version:** v0.4
 **Date:** 2026-08-30
-**Supersedes:** v0.2 (2026-08-30, at `6479fc7`)
+**Supersedes:** v0.3 (2026-08-30, at `5571de0`)
 **Read first.** Every session that touches `substrate-crossing/` reads this
 file before reading code. Conventions land here at the session that
 establishes them, never later. Where a line describes something decided but
@@ -14,26 +14,29 @@ Sources of truth as of this version: `src/crossing-intent.ts`,
 `src/canonical-json.ts`, `src/assembly.ts`, `src/seam-crossing-ref.ts`,
 `src/observation-log.ts`, `scripts/run-crossing.ts`,
 `test/item-3-1-public-subset.test.ts`,
-`test/item-3-2-delayed-release.test.ts`,
+`test/item-3-2-delayed-release.test.ts`, `test/item-3-3-toctou.test.ts`,
+`test/crossing-fire.test.ts`,
 `test/spike/spike-3-1b-encrypted-transport.test.ts`,
 `docs/observation-log-pc08.md`.
 
-**What changed v0.2 → v0.3.** Run 7 (Item 3.2, delayed-release crossing) ran
-on 2026-08-30 on the encrypted transport and the operator confirmed
-AC-3.2.1–3.2.6 plus the spec-r2 adversarial (replay) step. D-2
-(`crossingGrantHorizon`) is now **as-implemented**: an optional not-before
-horizon on the intent record, checked in a single horizon step (3h) together
-with the timeout check, **before** the assembly-document write — the timeout
-check moved from after the write (F-3.2-1; the v0.2 §Records line "an
-expired or unmet horizon at mint produces no assembly document write" was
-stale against the code at `6479fc7` and is true by construction from the
-Item 3.2 diff). D-7 (horizon consistency: `grant ≥ timeout` →
-`horizon-inconsistent`, refused explicitly) lands as text in §Gate and
-§Records. New in this version: the delayed-release scenario and leg order
-(replay leg post-pass by design), the optional-field rules for
-`crossingGrantHorizon`, the Run 7 evidence target, the relay-watcher watch
-item (F-3.2-5), and the AppView pre-embargo-timestamp legibility note.
-KL-12 remains observation-only; nothing here is lexicon evidence.
+**What changed v0.3 → v0.4.** Run 8 (Item 3.3, aggregated crossing with
+TOCTOU between mint and fire) ran on 2026-08-30 local (2026-08-31 UTC) on
+the encrypted transport and the operator confirmed AC-3.3.1–3.3.6 plus the
+spec-r2 adversarial (post-block retest) step. **Fire-time re-verification
+is now as-implemented** on two surfaces: (A) the seam re-reads the assembly
+document immediately before the fire and blocks (`fire-verification-blocked`)
+if its content digest no longer equals the minted `authorizedContentDigest`;
+(B) the fire wrapper checks the outgoing payload's content object against
+the minted digest and throws before publish on inequality. The v0.3 §Digest
+sentence "not implemented at this version" is retired. New in this version:
+the `aggregated` scenario and its leg order (determinism pre-check →
+negative → TOCTOU → positive), the test-only injection hook and its rules
+(Item 3.3 ruling Q4), the block-vs-fault rule stated generally (ruling Q2),
+the payload-provenance rule (F-3.3-1), the Run 8 evidence target, and the
+F-3.2-5 / F-3.2-6 runner fixes (with a scoped verification note). D-1 r2,
+D-2, D-3, D-4, D-5, D-7 unchanged; the 3h horizon step and all mint-side
+gates are byte-for-byte those of `5571de0`. KL-12 remains
+observation-only; nothing here is lexicon evidence.
 
 ---
 
@@ -180,9 +183,16 @@ whitespace, absent `createdAt` serialized as `null`.
   holding the intent record and the published record. It does not constrain
   a crossing actor who controls the seam: confidentiality is enforced at the
   capability layer (D-1); the digest is evidence, not enforcement, against
-  the actor itself. Fire-time re-verification of the outgoing payload
-  against the minted digest (TOCTOU between mint and fire) is Item 3.3's
-  scope, not implemented at this version.
+  the actor itself. What the seam **does** enforce, from this version, is
+  its own self-consistency at the fire edge — see **Fire-time
+  re-verification (Item 3.3)** under Gate: the seam will not publish content
+  its own intent record does not describe.
+- **Payload provenance (F-3.3-1).** The published record's content object
+  `{title, content, createdAt}` is built from the assembled content the
+  seam hash-checked at step 3 — never from an independent fixture or a
+  separately constructed object. Before v0.4 this was runner discipline; it
+  is now enforced by the fire wrapper (surface B) and asserted by the e2e
+  test on the bytes actually published.
 
 **Subset publication (D-1) — as implemented.** A document is never partly
 authorized. Sections that may carry different authorizations are separate
@@ -274,7 +284,20 @@ retirement of the old step 5 are the Item 3.2 diff — F-3.2-1):
    remains; document reads `crossing-unconfirmed` at elapse. (The grant
    horizon is not re-checked at fire: it was satisfied at mint and time
    moves forward.)
-8. Fire `putRecord(intent)`.
+7v. **Fire-time re-verification** (Item 3.3; the code comment names this
+   step `8v` — the code counts the read-back as its own step 7). One fresh
+   read of the assembly document; digest over its content object must
+   hash-equal the **minted** `authorizedContentDigest` (the value on the
+   intent record, not a recomputation of step 3). Inequality →
+   `fire-verification-blocked`: no `putRecord`; the intent record stays
+   document-resident (not retracted — append-only holds inside the
+   document); the document reads `crossing-unconfirmed`; retry requires a
+   fresh gate pass from step 1. Equality → `fire-verification-pass`,
+   stamped.
+8. Fire `putRecord(intent)`. Inside the fire wrapper, before the publish
+   call: the outgoing payload's content object is digested and compared to
+   the minted digest — inequality is a **seam fault** (thrown; publish not
+   attempted; `putRecordCalledAt` never stamped).
 9. On accepted publish, write the completion (separate call, same
    discipline: guard → mint → write → hook → read-back).
 
@@ -286,8 +309,9 @@ with milliseconds, UTC. Events in order: `gate-check-started`,
 blocks — `grant-horizon-not-reached`, `horizon-inconsistent`,
 `timeout-horizon-expired` (all three precede any assembly write from this
 version) — then `assembly-document-written`, `intent-record-written`,
-`intent-record-read-confirmed`, `put-record-fired`, `put-record-accepted`,
-`completion-record-written`.
+`intent-record-read-confirmed`, then `fire-verification-pass` /
+`fire-verification-blocked` (Item 3.3), `put-record-fired`,
+`put-record-accepted`, `completion-record-written`.
 
 **Grant boundary (D-1) — as implemented.** The grant boundary equals the
 publish boundary. No principal other than the author holds read on a
@@ -359,6 +383,84 @@ not clamped, not reordered, not rejected outside the seam. The seam is the
 only place the two fields meet. Unit-tested (equal; later) in
 `test/item-3-2-delayed-release.test.ts`.
 
+**Fire-time re-verification (Item 3.3) — as implemented, Run 8.** Every
+gate through step 7 is mint-side: it decides *what is authorized*. Until
+`5571de0` nothing checked *what was sent*; the seam handed the intent to an
+injected `putRecord` and trusted it, and the digest bound the intent to the
+assembly, not to the payload. Two surfaces close that:
+
+- **Surface A — assembly mutated after mint (step 7v).** A gate-style
+  **block**, never a throw. Rule, stated generally (Item 3.3 ruling Q2): a
+  *seam fault* is the seam breaking its own invariant on bytes it just
+  wrote (the step-4 recompute); a *block* is an external condition detected
+  — time passed and the document changed under the seam, like an expired
+  horizon. The block preserves the evidence posture the item exists to
+  observe: a loggable event, a document-resident intent, and the
+  `crossing-unconfirmed` derivation. Status and event share the name
+  `fire-verification-blocked` (ruling Q3; the `horizon-not-reached`
+  precedent).
+- **Surface B — outgoing payload diverged (fire wrapper).** A **throw**:
+  the runner builds the payload from the same assembled content the seam
+  verified, so divergence means the harness itself is broken or tampered.
+  The check is over the content object only — `$type`, `visibility`, and
+  `seamCrossingRef` are outside the digest boundary (spec r2 failure mode 2
+  closed by construction). It runs whenever the authorizing intent is
+  supplied, which `initiateCrossing()` always does (Item 1.4); intent-less
+  direct calls (timing-capture unit tests) have no digest to check and
+  skip. **Surface B evidence is unit-test-only by design** (a live
+  mismatched publish would mint garbage evidence) — scoped absence,
+  operator-accepted 2026-08-30; Run 8's positive leg exercised the check
+  live on a matching payload and passed.
+
+**TOCTOU window, measured and named (AC-3.3.4/3.3.5).** Run 8 positive
+leg: mint→re-verification (`intent-record-written` → `fire-verification-pass`)
+<1 ms; residual (`fire-verification-pass` → `put-record-fired`) <1 ms. TOCTOU
+leg: mint 00:34:58.333Z → `fire-verification-blocked` 00:34:58.335Z (2 ms),
+intent resident=1, no `put-record-fired` event. Bounding mechanism:
+single-process, single-run pipeline; no awaited I/O between the 7v read and
+the fire stamp beyond the microtask boundary. The re-verification collapses
+the exploitable window from (mint→fire) to (7v-read→fire); it does **not**
+eliminate it — the surface is un-eliminable and is named as such.
+Aggregated-data pattern is the strongest test of `authorizedContentDigest`
+binding; TOCTOU surface named.
+
+**Test-only injection hook (Item 3.3 ruling Q4, spike-D discipline).**
+`initiateCrossing()` accepts `__testOnlyBetweenMintAndFire`, a function
+parameter invoked between the read-back and the timeout re-check, opening
+the mint-to-fire window deterministically for the TOCTOU leg and the Item
+3.3 unit tests. Rules: **omitted** on the production path (omitted-never-null
+— present-but-not-a-function is a seam fault, the `crossingGrantHorizon`
+rule); it is a parameter, never a record field, and cannot enter canonical
+JSON or any digest (unit-tested: the minted intent carries no hook-named
+key). Recorded as a named fixture deviation, as the Run 6 fixture deviations
+were.
+
+**Aggregated leg order (Item 3.3, operator-confirmed 2026-08-30).** The
+`aggregated` scenario (`doc_a` + `doc_b`, independent grants, no un-granted
+control document) runs: determinism pre-check (assemble twice,
+byte-identical, else abort — spec r2 FM1) → negative (byte-append tamper:
+length *and* hash change; the gate blocks on hash inequality only, FM3;
+`digest-blocked`, nothing written) → TOCTOU (hook-mutated assembly →
+`fire-verification-blocked`) → positive (the post-block retest; proves no
+latched state). Run 8: negative blocked 00:34:58.317Z, preceding the
+run's earliest intent timestamp (00:34:58.333Z, TOCTOU leg) — AC-3.3.3's
+ordering clause; positive fired 00:34:58.826Z, accepted 00:34:59.158Z.
+
+**F-3.3-1 (registered 2026-08-30).** On its first in-container run the
+Surface B check caught the Item 1.2-era e2e fixture
+(`test/crossing-fire.test.ts`, timed publish + relay sim) publishing a
+`makeRecord()` payload divergent from the content its intent authorized —
+masked until fire-time verification existed, because the test asserted on
+timing and log order, never on published bytes, and its "PDS" is an
+in-process mock. Fixture-only: no live record affected; Runs 1–7 published
+via the runner, whose record is built from the assembled content (clean by
+runner discipline, now enforced). Remediation: the fixture builds its record
+from the authorized content and asserts on the published title/content/
+createdAt; the remaining `makeRecord()` uses call `makeTimedPutRecord`
+without an intent (timing-capture tests) and skip by design. Operator
+disposition: real finding, no SL-0188 exposure (no finding against the 3h
+gate order or the optional-field rules).
+
 **Negative-leg presentation.** The negative leg presents the un-granted
 document to the gate **by ID, unconditionally**, after the bounded
 un-granted probe (`probeUngranted()`, see Environment) has recorded its
@@ -366,9 +468,8 @@ result. The brief's earlier `loadOnActor(section_c, 5_000)` /
 `unloadableInput` wording (Finding 6) describes the same intent; the shipped
 runner is the reference.
 
-**Decided, not implemented:**
-
-- **Fire-time payload re-verification (TOCTOU).** Item 3.3 (Run 8).
+**Decided, not implemented:** none at this version. (Fire-time payload
+re-verification, listed here in v0.3, is as-implemented above.)
 
 Every gate decision is re-evaluated on every attempt. A prior pass, block,
 or mismatch carries no state into the next attempt.
@@ -458,7 +559,9 @@ primary handle; nothing has been published under the primary handle. Run 2
 (`3mubag4iqdp2q`, CID
 `bafyreigiaiypsj3vwgss4yh3arthyqofoxndhwoni7ps74ja5lazlw5gty`), Run 7
 (`3mucx4edq542p`, CID
-`bafyreib7wtjclkjuu6bbzyumwyp3puwsm2ihdli7w2ja3qbif2swgjmhyy`).
+`bafyreib7wtjclkjuu6bbzyumwyp3puwsm2ihdli7w2ja3qbif2swgjmhyy`), Run 8
+(`3mudnwhpxpn25`, CID
+`bafyreigk4xbapjzocfhlbxd7d6pgurdxjccmrosc4o6ggze72m5pypxlci`).
 `check:pds` probe records (Item 0.2 shape, most recently `3mucwyu2eye2l`)
 are not evidence targets and may be cleaned at the operator's option;
 governed-crossing records are never deleted. The Run 5
@@ -548,15 +651,19 @@ runner default (`DEFAULT_JETSTREAM`); overridable by `JETSTREAM_ENDPOINT`.
 `wantedCollections` server-side filtering does not deliver
 `com.whtwnd.blog.entry` commits; subscriptions are unfiltered with
 client-side DID + collection matching, opened before the publish fires.
-Run 6 relay ingest gap: 15.9 s. **Watch (F-3.2-5):** Run 7
-`relay_ingested_at` = null (applicable, unobserved) — the watcher opened
-before the ~92 s embargo wait and idled across it; Runs 1–6 fired within
-seconds of open; `check:pds` ingested 179 ms three minutes earlier; KL-2
-unaffected (`getRecord()` intact). Queued runner fix: open the watcher
-after the wait. Not re-run. **F-3.2-6 (cosmetic, queued with F-3.2-5):**
-the runner's AFTER-HORIZON gate observation stamps its "attempt at" time
-post-leg; the crossing log (`gate-check-started`) is authoritative for
-attempt timing.
+Run 6 relay ingest gap: 15.9 s. **F-3.2-5 — fixed (Item 3.3 diff).** Run 7
+`relay_ingested_at` was null because the watcher opened before the ~92 s
+embargo wait and idled across it. The runner now opens the subscription
+**immediately before the fireable leg**, after all waits and blocked legs
+(uniform rule for every scenario; blocked legs never fire). Run 8:
+`relay_ingested_at` 00:34:59.410Z, 252 ms after PDS accept — the
+relay-path ~ carried on SL-0188 lifts for the aggregated scenario.
+**Scoped verification (Item 3.3 ruling Q1):** the reorder's delayed-release
+behaviour is verified by inspection, not by a delayed-release re-run (Run 8
+has no embargo wait); **lift event:** any future delayed-release run
+validates it incidentally. **F-3.2-6 — fixed:** the fireable leg's
+"attempt at" is captured before the leg runs (Run 8: 00:34:58.819Z,
+preceding `gate-check-started`); the crossing log remains authoritative.
 
 **Keyhive capabilities** are document-granular. `Access` is a four-level
 total order — relay (0), read (1), edit (2), admin (3) — with `isReader`,
@@ -582,7 +689,9 @@ environment has no network access to the PDS or relay. Scripts:
 `baseline:0-3`, `test`. The spike suite runs under `vitest.spike.config.ts`
 and is excluded from `tsc` via `tsconfig.json` `exclude: ["test/spike/**"]`
 (Finding 7). `test/item-3-2-delayed-release.test.ts` runs in the default
-glob, not the spike config (Item 3.2 ruling f). Delayed-release runner
+glob, not the spike config (Item 3.2 ruling f); so does
+`test/item-3-3-toctou.test.ts`. Aggregated runner flag: `--scenario
+aggregated` (Run 8; no horizon flags apply). Delayed-release runner
 flags: `--scenario delayed-release`; `--grant-horizon-s N` sets
 T1 = now + N (default 90, **floor 60** — spec r2 Item 3.2 failure mode 2;
 the runner refuses lower); `--horizon-s N` becomes T1 + N for this scenario
@@ -603,12 +712,13 @@ the file on disk, stated by the operator.
 
 ## Decisions in force
 
-Reference commit for "as implemented" statements above: **the Item 3.2
+Reference commit for "as implemented" statements above: **the Item 3.3
 reference commit** — the single commit that lands this file together with
-the Item 3.2 diff (`run-crossing.ts`, `crossing-intent.ts`, the two test
-files), the Run 7 entry and the post-notes observation log on `main`. Its
-SHA is recorded in manifest r4 and in the SL-0188 delta; until then
-`6479fc7` (the Item 3.1 reference commit) remains the pin.
+the Item 3.3 diff (`run-crossing.ts`, `crossing-intent.ts`,
+`crossing-fire.ts`, `crossing-fire.test.ts`, `item-3-3-toctou.test.ts`),
+the Run 8 entry and the post-notes observation log on `main`. Its SHA is
+recorded in manifest r5 and in the SL-0189 delta; until then `5571de0`
+(the Item 3.2 reference commit) remains the pin.
 
 | Decision | File | One line |
 |---|---|---|
@@ -630,7 +740,13 @@ before-horizon leg; (c) D-7 taken with a decision record; (d) runner
 defaults `--grant-horizon-s 90` floor 60, `--horizon-s 120` unchanged;
 (e) actor-hive gate candidate **dropped from Item 3.2, kept for the
 addendum** — still not a ruling; (f) the Item 3.2 substrate test in the
-default glob, no spike.
+default glob, no spike. Item 3.3 rulings, 2026-08-30 — (Q1) F-3.2-5/-6
+ride the Item 3.3 diff, scoped verification with a named lift event;
+(Q2) surface A mismatch is a gate-style block, surface B a seam fault —
+the block-vs-fault rule stated generally; (Q3) status
+`fire-verification-blocked`, identical to the event; (Q4) test-only hook
+under spike-D discipline, omitted-never-null, never a record field.
+F-3.3-1 registered, fixture-only, no SL-0188 exposure.
 
 Decision files are kept with the project's working records; each is the head
 of its supersede chain until a later file names it.

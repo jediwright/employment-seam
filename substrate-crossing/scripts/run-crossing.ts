@@ -177,7 +177,7 @@ function flag(name: string, fallback: string): string {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 
-type Scenario = 'baseline' | 'failed' | 'public-subset' | 'delayed-release';
+type Scenario = 'baseline' | 'failed' | 'public-subset' | 'delayed-release' | 'aggregated';
 const RUN_N = Number(flag('run', '1'));
 const SCENARIO = flag('scenario', 'baseline') as Scenario;
 const HORIZON_S = Number(flag('horizon-s', '120'));
@@ -493,9 +493,9 @@ function fmtLog(log: CrossingLogEntry[]): string[] {
 /** phase3_* fields: required from Run 6 (buildH3Entry enforces); for earlier
  *  run numbers on baseline/failed they are omitted → n/a. */
 function phase3Fields(scenario: Scenario, gateObs: string[], findings: string[]): H3Phase3Fields | undefined {
-  if (RUN_N < 6 && scenario !== 'public-subset' && scenario !== 'delayed-release') return undefined;
+  if (RUN_N < 6 && scenario !== 'public-subset' && scenario !== 'delayed-release' && scenario !== 'aggregated') return undefined;
   return {
-    pattern: scenario === 'delayed-release' ? 'delayed-release' : 'public-subset',
+    pattern: scenario === 'delayed-release' ? 'delayed-release' : scenario === 'aggregated' ? 'aggregated' : 'public-subset',
     gateObservation: gateObs.join(' | '),
     finding: findings.join(' | '),
   };
@@ -525,7 +525,9 @@ async function emitEntry(p: {
     ? 'Item 3.1 public-subset crossing (negative → adversarial → positive)'
     : p.scenario === 'delayed-release'
       ? 'Item 3.2 delayed-release crossing (before-horizon → after-horizon → replay)'
-      : `Item 3.1 uniform-assembly-path run (${p.scenario})`;
+      : p.scenario === 'aggregated'
+        ? 'Item 3.3 aggregated crossing (determinism → negative → TOCTOU → positive)'
+        : `Item 3.1 uniform-assembly-path run (${p.scenario})`;
   console.log('\n' + renderH3Entry(entry, label));
   const outPath = writeH3EntryFile(entry, { runLabel: label });
   console.log(`${TAG} H.3 entry written to ${outPath}`);
@@ -545,8 +547,8 @@ async function main() {
     console.error(`${TAG} --run must be a positive integer`);
     process.exit(1);
   }
-  if (!['baseline', 'failed', 'public-subset', 'delayed-release'].includes(SCENARIO)) {
-    console.error(`${TAG} --scenario must be baseline | failed | public-subset | delayed-release`);
+  if (!['baseline', 'failed', 'public-subset', 'delayed-release', 'aggregated'].includes(SCENARIO)) {
+    console.error(`${TAG} --scenario must be baseline | failed | public-subset | delayed-release | aggregated`);
     process.exit(1);
   }
   if (SCENARIO === 'delayed-release' && (!Number.isFinite(GRANT_HORIZON_S) || GRANT_HORIZON_S < GRANT_HORIZON_FLOOR_S)) {
@@ -597,6 +599,18 @@ async function main() {
     await grantWithPoll(author, sectionB.url, actorCard, Access.read());
     // section_c: NO grant.
     for (const [n, h] of [['section_a', sectionA], ['section_b', sectionB], ['section_c', sectionC]] as const) {
+      const a = await author.hive.accessForDoc(actorId, h.url);
+      console.log(`${TAG} issuer accessForDoc(actor, ${n}) = ${a ? a.toString() : 'undefined'}  ${h.url}`);
+    }
+  } else if (SCENARIO === 'aggregated') {
+    // Item 3.3 fixture: doc_a (employment subset) + doc_b (project subset),
+    // independent grants, no un-granted control document (spec r2 §Item 3.3
+    // design; the capability half was evidenced at Runs 6/spike).
+    sectionA = await (author.repo as any).create2(mkSection('doc_a', true));
+    sectionB = await (author.repo as any).create2(mkSection('doc_b', true));
+    await grantWithPoll(author, sectionA.url, actorCard, Access.read());
+    await grantWithPoll(author, sectionB.url, actorCard, Access.read());
+    for (const [n, h] of [['doc_a', sectionA], ['doc_b', sectionB]] as const) {
       const a = await author.hive.accessForDoc(actorId, h.url);
       console.log(`${TAG} issuer accessForDoc(actor, ${n}) = ${a ? a.toString() : 'undefined'}  ${h.url}`);
     }
@@ -663,16 +677,15 @@ async function main() {
     findings.push(obs);
   }
 
-  // --- 3. Relay watcher open BEFORE any fire ---
-  const watcher = new JetstreamWatcher({
-    endpoint: JETSTREAM,
-    did,
-    timeoutMs: RELAY_TIMEOUT_MS,
-    wsFactory: (url) => new WebSocket(url) as any,
-  });
-  await watcher.start();
-  console.log(`${TAG} relay subscription open: ${JETSTREAM} (client-side DID+collection filter)`);
-
+  // --- 3. Relay watcher: constructed here, OPENED immediately before the
+  // first fireable leg (section 5) — F-3.2-5 fix. The prior placement
+  // opened the subscription before the scenario legs, so on delayed-release
+  // the watcher idled across the embargo wait (~92 s at Run 7) and
+  // relay_ingested_at read null. Uniform rule for all scenarios: open
+  // immediately before the leg that can fire; blocked legs never fire and
+  // need no subscription. Scoped verification (Q1 ruling): the reorder is
+  // verified by inspection for delayed-release — any future delayed-release
+  // run validates it incidentally (the named lift event).
   const grantedInputs: CrossingInputHandle[] = sectionB
     ? [inputHandle(actorA), inputHandle(actorB)]
     : [inputHandle(actorA)];
@@ -810,8 +823,108 @@ async function main() {
     }
   }
 
+  // --- 4e. aggregated: DETERMINISM pre-check (spec r2 failure mode 1) ---
+  if (SCENARIO === 'aggregated') {
+    const once = assembleCrossingContent(grantedContents);
+    const twice = assembleCrossingContent(grantedContents);
+    const identical = JSON.stringify(once) === JSON.stringify(twice);
+    const dobs = `DETERMINISM pre-check: assembleCrossingContent([doc_a, doc_b]) run twice on identical inputs → byte-identical=${identical} (fixed input order, canonical serialization, no timestamp/random injection — D-3). ${identical ? 'Digest binding cannot fail spuriously on the positive case from aggregation drift.' : 'NOT DETERMINISTIC — abort before the gate test (spec r2 FM1).'}`;
+    console.log(`${TAG} ${dobs}`);
+    gateObservations.push(dobs);
+    if (!identical) {
+      findings.push('Aggregation non-determinism detected at the pre-check; run aborted (spec r2 Item 3.3 failure mode 1).');
+      process.exit(1);
+    }
+  }
+
+  // --- 4f. aggregated: NEGATIVE leg (pre-mint tamper; AC-3.3.3, FM3) ---
+  if (SCENARIO === 'aggregated') {
+    const asmNeg = await makeAssemblyDoc(actor, author, 'aggregated negative leg');
+    // Byte-append tamper: changes BOTH length and hash; the gate blocks on
+    // hash inequality only (never length or field presence) — stated per
+    // spec r2 failure mode 3.
+    const tampered: CrossingSourceContent = {
+      ...presented,
+      content: presented.content + '\n\n<!-- TOCTOU-class tamper: bytes appended to the aggregate between digest computation and the gate check -->',
+    };
+    const log: CrossingLogEntry[] = [];
+    const outcome = await initiateCrossing({
+      inputs: grantedInputs,
+      handle: asmNeg.handle,
+      presentedContent: tampered,
+      gateCheck: gate,
+      putRecord: neverFire,
+      identity,
+      targetPDS: PDS_SERVICE,
+      regimeAcknowledgment: ACK,
+      crossingTimeoutHorizon: horizonFor(),
+      log,
+    });
+    allLogs.push({ leg: 'aggregated-negative', log });
+    const asmDoc = (await asmNeg.handle.doc()) as CompletionDocShape;
+    const untouched = assemblyDocIsUntouched(asmDoc);
+    const blockedAt = log.find((l) => l.event === 'digest-check-blocked');
+    const obs = `AGGREGATED NEGATIVE leg (pre-mint tamper): modified aggregate presented → ${outcome.status}${outcome.status === 'digest-blocked' ? ' on HASH inequality at step 3 (not length, not field presence — FM3)' : ' (UNEXPECTED)'}; block logged ${blockedAt?.at ?? 'n/a'} — precedes any intent-record timestamp (no intent exists); assembly document untouched=${untouched}; intent records=${(asmDoc.crossingRecords ?? []).length}; putRecord not called (AC-3.3.3).`;
+    console.log(`${TAG} ${obs}`);
+    gateObservations.push(obs);
+    if (outcome.status !== 'digest-blocked' || !untouched) {
+      findings.push('AGGREGATED NEGATIVE leg did not block on digest mismatch with nothing written — AC-3.3.3 not met; investigate before closing Item 3.3.');
+    }
+  }
+
+  // --- 4g. aggregated: TOCTOU leg (mutation between mint and fire; Item 3.3 core) ---
+  if (SCENARIO === 'aggregated') {
+    const asmT = await makeAssemblyDoc(actor, author, 'aggregated TOCTOU leg');
+    const log: CrossingLogEntry[] = [];
+    // Named deviation (Q4 ruling, spike-D discipline): the test-only hook
+    // opens the mint-to-fire window deterministically; on the production
+    // path the parameter is OMITTED (omitted-never-null). The mutation is
+    // an actor-side Automerge change to the assembly document's content —
+    // the exact Surface A the re-verification exists to detect.
+    const outcome = await initiateCrossing({
+      inputs: grantedInputs,
+      handle: asmT.handle,
+      presentedContent: presented,
+      gateCheck: gate,
+      putRecord: neverFire,
+      identity,
+      targetPDS: PDS_SERVICE,
+      regimeAcknowledgment: ACK,
+      crossingTimeoutHorizon: horizonFor(),
+      log,
+      __testOnlyBetweenMintAndFire: () => {
+        asmT.handle.change((d: any) => {
+          d.content = d.content + '\n\n<!-- assembly mutated AFTER intent mint, BEFORE fire (TOCTOU) -->';
+        });
+      },
+    });
+    allLogs.push({ leg: 'aggregated-toctou', log });
+    const asmDoc = (await asmT.handle.doc()) as CompletionDocShape;
+    const intents = (asmDoc.crossingRecords ?? []).filter((r: any) => r.recordType === 'crossing-intent').length;
+    const blockedAt = log.find((l) => l.event === 'fire-verification-blocked');
+    const mintAt = log.find((l) => l.event === 'intent-record-written');
+    const windowMs = blockedAt && mintAt ? Date.parse(blockedAt.at) - Date.parse(mintAt.at) : null;
+    const obs = `AGGREGATED TOCTOU leg: assembly document mutated between mint and fire (test-hook injection, named deviation) → ${outcome.status}${outcome.status === 'fire-verification-blocked' ? ' at step 8v on hash inequality against the MINTED authorizedContentDigest' : ' (UNEXPECTED)'}; fire-verification-blocked logged ${blockedAt?.at ?? 'n/a'}; no put-record-fired event exists in this log (ordering statement); intent records document-resident=${intents} (not retracted — append-only holds inside the document); crossing reads crossing-unconfirmed; retry requires a fresh gate pass (steps 1–3h). Mint→block window ${windowMs ?? 'n/a'}ms.`;
+    console.log(`${TAG} ${obs}`);
+    gateObservations.push(obs);
+    if (outcome.status !== 'fire-verification-blocked' || intents !== 1) {
+      findings.push('AGGREGATED TOCTOU leg did not block at fire-time re-verification with a document-resident intent — Item 3.3 core behaviour not met; investigate before closing.');
+    }
+  }
+
+  // --- 5w. Relay watcher OPEN (F-3.2-5: after all waits and blocked legs,
+  // immediately before the fireable leg) ---
+  const watcher = new JetstreamWatcher({
+    endpoint: JETSTREAM,
+    did,
+    timeoutMs: RELAY_TIMEOUT_MS,
+    wsFactory: (url) => new WebSocket(url) as any,
+  });
+  await watcher.start();
+  console.log(`${TAG} relay subscription open: ${JETSTREAM} (client-side DID+collection filter; opened immediately before the fireable leg — F-3.2-5)`);
+
   // --- 5. POSITIVE leg (all scenarios): the governed crossing ---
-  const legLabel = SCENARIO === 'public-subset' ? 'positive leg' : SCENARIO === 'delayed-release' ? 'after-horizon leg' : SCENARIO;
+  const legLabel = SCENARIO === 'public-subset' ? 'positive leg' : SCENARIO === 'delayed-release' ? 'after-horizon leg' : SCENARIO === 'aggregated' ? 'aggregated positive leg' : SCENARIO;
   const asm = await makeAssemblyDoc(actor, author, legLabel);
   findings.push(`Assembly document creator access (${legLabel}): accessForDoc(self)=${asm.creatorAccess}; members: ${asm.membership}.`);
   const record: WhtwndEntryRecord = {
@@ -848,6 +961,9 @@ async function main() {
   let intentEmittedAt: string | null = null;
   let firedIntent: CrossingIntentRecord | null = null;
   let fireError: string | null = null;
+  // F-3.2-6 fix: the attempt timestamp is captured BEFORE the leg runs;
+  // the crossing log remains authoritative for event times.
+  const fireAttemptAt = new Date().toISOString();
   try {
     const outcome = await initiateCrossing({
       inputs: grantedInputs,
@@ -896,8 +1012,10 @@ async function main() {
   allLogs.push({ leg: SCENARIO === 'delayed-release' ? 'after-horizon' : 'positive', log });
   gateObservations.push(
     SCENARIO === 'delayed-release'
-      ? `AFTER-HORIZON leg: attempt at ${new Date().toISOString()} with crossingGrantHorizon=${grantHorizon} (T1 passed) → gate passed on isReader (issuer's hive) → assembled → digest matched → horizon step passed (fresh clock read) → assembly document written → ${outcomeStatus}; intent carries crossingGrantHorizon=${firedIntent?.crossingGrantHorizon ?? 'n/a'} and crossingTimeoutHorizon=${firedIntent?.crossingTimeoutHorizon ?? 'n/a'} (AC-3.2.3).`
-      : `POSITIVE leg: presented ${grantedInputs.length} granted input(s) → gate passed on isReader for each (issuer's hive) → assembled → digest matched → assembly document written → ${outcomeStatus}.`,
+      ? `AFTER-HORIZON leg: attempt at ${fireAttemptAt} with crossingGrantHorizon=${grantHorizon} (T1 passed) → gate passed on isReader (issuer's hive) → assembled → digest matched → horizon step passed (fresh clock read) → assembly document written → ${outcomeStatus}; intent carries crossingGrantHorizon=${firedIntent?.crossingGrantHorizon ?? 'n/a'} and crossingTimeoutHorizon=${firedIntent?.crossingTimeoutHorizon ?? 'n/a'} (AC-3.2.3).`
+      : SCENARIO === 'aggregated'
+        ? `AGGREGATED POSITIVE leg (retest, post-block by design — spec r2 adversarial step): attempt at ${fireAttemptAt}; presented the original unmodified aggregate of [doc_a, doc_b] → gate passed on isReader for each (issuer's hive) → assembled (deterministic, fixed order) → digest matched → horizon step passed → assembly document written → fire-time re-verification passed (step 8v) → ${outcomeStatus}; the gate did not latch on the earlier blocks (AC via retest).`
+        : `POSITIVE leg: presented ${grantedInputs.length} granted input(s) → gate passed on isReader for each (issuer's hive) → assembled → digest matched → assembly document written → ${outcomeStatus}.`,
   );
 
   // --- 5r. delayed-release: REPLAY leg (adversarial; spec r2 Item 3.2 step) ---

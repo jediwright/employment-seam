@@ -26,6 +26,9 @@
  */
 import type { PutRecordFn, Clock, CrossingIntentRecord } from './crossing-intent.js';
 import { buildSeamCrossingRef, type SeamCrossingRef } from './seam-crossing-ref.js';
+// Item 3.3 (Surface B): the canonical digest implementation (CONVENTIONS
+// §Digest — digest.ts is canonical; do not add a third).
+import { authorizedContentDigest } from './digest.js';
 
 // ---------------------------------------------------------------------------
 // Timed live publish — PDS-accept instrumentation (AC-1.2)
@@ -97,6 +100,29 @@ export function makeTimedPutRecord(params: {
     const payload: WhtwndEntryRecord = params.attachSeamCrossingRef
       ? { ...params.record, seamCrossingRef: buildSeamCrossingRef(intent!) }
       : params.record;
+    // Item 3.3 (Surface B) — fire-wrapper payload check: the OUTGOING
+    // payload's content object {title, content, createdAt} must hash-equal
+    // the minted authorizedContentDigest. The digest-object boundary is
+    // preserved: $type, visibility, and seamCrossingRef are outside it
+    // (this also closes spec failure mode 2 by construction). A mismatch
+    // here THROWS (seam-fault posture, Q2 ruling): the runner builds this
+    // payload from the same assembled content the seam verified, so
+    // divergence means the harness itself is broken or tampered. The check
+    // runs whenever the authorizing intent is supplied — initiateCrossing()
+    // always passes it (Item 1.4); intent-less direct calls (mock/unit
+    // paths) have no digest to verify against and skip.
+    if (intent) {
+      const payloadDigest = authorizedContentDigest({
+        title: payload.title,
+        content: payload.content,
+        createdAt: payload.createdAt,
+      });
+      if (payloadDigest !== intent.authorizedContentDigest) {
+        throw new Error(
+          `seam fault: outgoing payload content digest ${payloadDigest} != minted authorizedContentDigest ${intent.authorizedContentDigest}; publish not attempted (Item 3.3 Surface B — harness payload diverged from the authorized assembly)`,
+        );
+      }
+    }
     params.timings.putRecordCalledAt = clock().toISOString();
     const res = await params.publish(payload);
     params.timings.pdsAcceptedAt = clock().toISOString();
